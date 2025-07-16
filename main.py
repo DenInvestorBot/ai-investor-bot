@@ -9,7 +9,6 @@ bot = Bot(token=os.environ['BOT_TOKEN'])
 chat_id = os.environ['CHAT_ID']
 openai.api_key = os.environ['OPENAI_API_KEY']
 
-# --- Крипта ---
 def get_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list"
     response = requests.get(url)
@@ -28,7 +27,6 @@ def analyze_coin(coin_id):
     risk = "🟢 Перспективно" if cap > 10_000_000 else "⚠️ Высокий риск"
     return f"🚀 {name} ({symbol.upper()})\n💰 Капа: ${cap}\n📊 Объём: ${vol}\n{tone}\n{risk}"
 
-# --- IPO ---
 def get_ipos():
     html = requests.get("https://www.nasdaq.com/market-activity/ipos", headers={"User-Agent": "Mozilla"}).text
     soup = BeautifulSoup(html, 'lxml')
@@ -40,7 +38,6 @@ def get_ipos():
             ipos.append(f"📢 IPO: {cols[1].text.strip()} ({cols[0].text.strip()})\n📆 {cols[2].text.strip()} | 💵 {cols[4].text.strip()}")
     return ipos
 
-# --- Reddit ---
 tickers = ['GME', 'RBNE', 'TSLA', 'AAPL', 'META', 'AMZN', 'MSFT', 'NVDA', 'GOOGL', 'NFLX']
 last_titles = set()
 
@@ -67,7 +64,6 @@ def gpt_summary(text):
     except:
         return "(GPT ошибка)"
 
-# --- Асинхронный запуск ---
 async def run():
     global last_titles
     known_coins = set(c['id'] for c in get_new_coins())
@@ -99,3 +95,4 @@ async def run():
             await asyncio.sleep(120)
 
 asyncio.run(run())
+
