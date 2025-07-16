@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: ai-investor-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    pythonVersion: 3.10.13
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: CHAT_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
