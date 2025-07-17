@@ -10,8 +10,12 @@ CHAT_ID = os.getenv("CHAT_ID")
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
     response = requests.get(url)
-    coins = response.json()
-    return coins[-5:]
+    data = response.json()
+
+    if isinstance(data, list):
+        return data[-5:]  # Возвращаем последние 5 монет
+    else:
+        return []
 
 def analyze_coin(coin_id):
     info = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}").json()
