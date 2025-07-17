@@ -1,7 +1,7 @@
 import requests
-import openai
 import os
 from telegram import Bot
+from openai import OpenAI
 
 # Подключение переменных окружения
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -9,7 +9,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=BOT_TOKEN)
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
@@ -35,17 +35,17 @@ def analyze_coin(coin_id):
         "Give a short investment analysis of this new coin:\n"
         "- Does it have future potential?\n"
         "- Is it risky?\n"
-        "- Should investors follow or avoid it?"
+        "- Should investors follow or avoid it?\n"
+        "- Does it have growth potential in the near future?"
     )
 
-    client = openai.OpenAI(api_key=OPENAI_API_KEY)
-response = client.chat.completions.create(
-    model="gpt-4",
-    messages=[{"role": "user", "content": prompt}],
-    max_tokens=500
-)
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=500
+    )
 
-return name, response.choices[0].message.content
+    return name, response.choices[0].message.content
 
 def send_to_telegram(message):
     bot.send_message(chat_id=CHAT_ID, text=message)
