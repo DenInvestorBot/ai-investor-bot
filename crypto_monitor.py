@@ -36,9 +36,9 @@ def analyze_coin(coin_id):
             f"Name: {name}\n"
             f"Market Cap: ${market_cap}\n"
             f"Volume: ${volume}\n\n"
-            f"Description: {description[:1000]}\n\n"
+            f"Description: {description[:500]}\n\n"
             f"Should an investor consider buying this coin? "
-            f"What are the risks and long-term potential?"
+            f"What are the risks, expected future growth, and long-term potential?"
         )
 
         response = openai_client.chat.completions.create(
@@ -51,7 +51,7 @@ def analyze_coin(coin_id):
         return name, analysis
 
     except Exception as e:
-        return name, f"⚠️ Ошибка анализа с GPT: {e}"
+        return name, f"⚠️ GPT-анализ не выполнен: {e}"
 
 def send_to_telegram(message):
     bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
