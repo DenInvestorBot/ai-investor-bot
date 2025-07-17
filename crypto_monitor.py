@@ -39,7 +39,7 @@ def analyze_coin(coin_id):
     f"Description: {description[:500]}\n\n"
     f"Should an investor consider buying this coin? "
     f"What are the risks, expected future growth, and long-term potential?"
-)
+
 
         response = openai_client.chat.completions.create(
             model="gpt-4",
