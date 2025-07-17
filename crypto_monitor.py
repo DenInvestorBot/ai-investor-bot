@@ -3,6 +3,7 @@ import openai
 import os
 from telegram import Bot
 
+# Подключение переменных окружения
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
@@ -15,7 +16,7 @@ def fetch_new_coins():
     response = requests.get(url)
     if response.ok:
         coins = response.json()
-        return coins[-5:]
+        return coins[-5:]  # Последние 5 монет
     return []
 
 def analyze_coin(coin_id):
@@ -27,12 +28,14 @@ def analyze_coin(coin_id):
     volume = market_data.get("total_volume", {}).get("usd", 0)
 
     prompt = (
-        f"Analyze the potential of this new coin:\n\n"
         f"Name: {name}\n"
         f"Market Cap: ${market_cap}\n"
-        f"Volume: ${volume}\n\n"
-        f"Description: {description[:1000]}\n\n"
-        f"Should investors watch it? Is there potential for growth? What are the risks?"
+        f"Volume: ${volume}\n"
+        f"Description: {description[:500]}\n\n"
+        "Give a short investment analysis of this new coin:\n"
+        "- Does it have future potential?\n"
+        "- Is it risky?\n"
+        "- Should investors follow or avoid it?"
     )
 
     response = openai.ChatCompletion.create(
@@ -40,6 +43,7 @@ def analyze_coin(coin_id):
         messages=[{"role": "user", "content": prompt}],
         max_tokens=500
     )
+
     return name, response.choices[0].message["content"]
 
 def send_to_telegram(message):
