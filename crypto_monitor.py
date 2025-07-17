@@ -32,14 +32,14 @@ def analyze_coin(coin_id):
         volume = market_data.get("total_volume", {}).get("usd", 0)
 
         prompt = (
-            f"🔍 Analyze the potential of this new cryptocurrency:\n\n"
-            f"Name: {name}\n"
-            f"Market Cap: ${market_cap}\n"
-            f"Volume: ${volume}\n\n"
-            f"Description: {description[:500]}\n\n"
-            f"Should an investor consider buying this coin? "
-            f"What are the risks, expected future growth, and long-term potential?"
-        )
+    f"🔍 Analyze the potential of this new cryptocurrency:\n\n"
+    f"Name: {name}\n"
+    f"Market Cap: ${market_cap}\n"
+    f"Volume: ${volume}\n\n"
+    f"Description: {description[:500]}\n\n"
+    f"Should an investor consider buying this coin? "
+    f"What are the risks, expected future growth, and long-term potential?"
+)
 
         response = openai_client.chat.completions.create(
             model="gpt-4",
