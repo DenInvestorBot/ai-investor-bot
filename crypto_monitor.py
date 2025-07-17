@@ -38,13 +38,14 @@ def analyze_coin(coin_id):
         "- Should investors follow or avoid it?"
     )
 
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=500
-    )
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[{"role": "user", "content": prompt}],
+    max_tokens=500
+)
 
-    return name, response.choices[0].message["content"]
+return name, response.choices[0].message.content
 
 def send_to_telegram(message):
     bot.send_message(chat_id=CHAT_ID, text=message)
