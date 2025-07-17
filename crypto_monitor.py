@@ -13,8 +13,10 @@ openai.api_key = OPENAI_API_KEY
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
     response = requests.get(url)
-    coins = response.json()
-    return list(coins)[-5:]
+    if response.ok:
+        coins = response.json()
+        return coins[-5:]
+    return []
 
 def analyze_coin(coin_id):
     info = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}").json()
@@ -24,26 +26,28 @@ def analyze_coin(coin_id):
     market_cap = market_data.get("market_cap", {}).get("usd", 0)
     volume = market_data.get("total_volume", {}).get("usd", 0)
 
-    prompt = f"""Analyze the potential of this new coin:
-Name: {name}
-Market Cap: ${market_cap}
-Volume: ${volume}
+    prompt = (
+        f"Analyze the potential of this new coin:\n\n"
+        f"Name: {name}\n"
+        f"Market Cap: ${market_cap}\n"
+        f"Volume: ${volume}\n\n"
+        f"Description: {description[:1000]}\n\n"
+        f"Should investors watch it? Is there potential for growth? What are the risks?"
+    )
 
-Description: {description[:1000]}
-Is it worth investing in? What are the risks and growth potential?
-"""
-
-    response = openai.chat.completions.create(
+    response = openai.ChatCompletion.create(
         model="gpt-4",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=500
     )
-    return name, response.choices[0].message.content.strip()
+    return name, response.choices[0].message["content"]
+
+def send_to_telegram(message):
+    bot.send_message(chat_id=CHAT_ID, text=message)
 
 def run_crypto_analysis():
     coins = fetch_new_coins()
     for coin in coins:
         coin_id = coin["id"]
         name, analysis = analyze_coin(coin_id)
-        bot.send_message(chat_id=CHAT_ID, text=f"🪙 *{name}*
-{analysis}", parse_mode="Markdown")
+        send_to_telegram(f"🪙 *{name}*\n{analysis}")
