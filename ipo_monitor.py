@@ -20,7 +20,8 @@ def fetch_today_ipos():
         if response.ok:
             return response.json().get("ipoCalendar", [])
     except Exception as e:
-        return []
+        pass
+    return []  
 
 def analyze_with_gpt(text):
     prompt = f"Дай краткую инвестиционную оценку IPO: {text}. Стоит ли следить за этой компанией?"
