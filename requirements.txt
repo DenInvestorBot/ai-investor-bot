@@ -4,3 +4,4 @@ beautifulsoup4
 lxml
 feedparser
 openai
+APScheduler==3.6.3
