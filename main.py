@@ -5,7 +5,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import os
-import asyncio
 from crypto_monitor import run_crypto_analysis
 from ipo_monitor import run_ipo_monitor
 from reddit_monitor import run_reddit_monitor
@@ -23,7 +22,7 @@ def job():
         logger.info("🚀 Запуск мониторинга крипты, IPO и Reddit...")
         run_crypto_analysis()
         run_ipo_monitor()
-        run_reddit_monitor()
+        run_reddit_monitor()  # Пока может быть заглушка
     except Exception as e:
         logger.error(f"❌ Ошибка в job(): {e}")
 
@@ -33,8 +32,10 @@ def main():
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
 
+    # Сразу первый запуск job
     job()
 
+    # Запуск job каждый день в 21:00 по МСК
     moscow_tz = pytz.timezone("Europe/Moscow")
     scheduler = BackgroundScheduler(timezone=moscow_tz)
     trigger = CronTrigger(hour=21, minute=0, timezone=moscow_tz)
