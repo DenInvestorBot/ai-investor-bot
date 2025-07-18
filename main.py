@@ -1,9 +1,11 @@
 import logging
-from telegram.ext import Updater, CommandHandler
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import os
+import asyncio
 from crypto_monitor import run_crypto_analysis
 from ipo_monitor import run_ipo_monitor
 from reddit_monitor import run_reddit_monitor
@@ -13,11 +15,8 @@ logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-updater = Updater(BOT_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
-
-def start(update, context):
-    update.message.reply_text("Привет! Я AI-инвестор бот. Буду держать тебя в курсе новостей IPO, крипты и Reddit 🚀")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я AI-инвестор бот. Буду держать тебя в курсе новостей IPO, крипты и Reddit 🚀")
 
 def job():
     try:
@@ -31,18 +30,20 @@ def job():
 def main():
     logger.info("🤖 AI-инвестор бот запущен!")
 
-    dispatcher.add_handler(CommandHandler("start", start))
-    updater.start_polling()
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
 
     # Сразу первый запуск job
     job()
 
     # Запуск job каждый день в 21:00 по МСК
-    scheduler = BackgroundScheduler(timezone=pytz.timezone("Europe/Moscow"))
-    scheduler.add_job(job, CronTrigger(hour=21, minute=0))
+    moscow_tz = pytz.timezone("Europe/Moscow")
+    scheduler = BackgroundScheduler(timezone=moscow_tz)
+    trigger = CronTrigger(hour=21, minute=0, timezone=moscow_tz)
+    scheduler.add_job(job, trigger=trigger)
     scheduler.start()
 
-    updater.idle()
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
