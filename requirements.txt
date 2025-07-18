@@ -1,8 +1,5 @@
 python-telegram-bot==20.3
-requests
-beautifulsoup4
-lxml
-feedparser
-openai
-APScheduler==3.6.3
-pytz
+apscheduler==3.6.3
+requests==2.32.4
+openai==1.17.0
+pytz==2025.2
