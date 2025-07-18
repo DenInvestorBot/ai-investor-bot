@@ -31,7 +31,7 @@ def analyze_with_gpt(text):
     prompt = f"Дай краткую инвестиционную оценку IPO: {text}. Стоит ли следить за этой компанией?"
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4",
+            model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150
         )
