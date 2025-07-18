@@ -39,8 +39,7 @@ def extract_mentions(posts):
 
 def analyze_sentiment(ticker, mentions):
     prompt = (
-        f"Reddit обсуждение тикера {ticker} упоминается {mentions} раз.
-"
+        f"Reddit обсуждение тикера {ticker} упоминается {mentions} раз.\n"
         f"Проанализируй общий тон обсуждений и инвестиционное настроение."
     )
     try:
@@ -65,8 +64,7 @@ def run_reddit_monitor():
         bot.send_message(chat_id=CHAT_ID, text="❗️ Ничего не обсуждается из заданных тикеров.")
         return
 
-    summary = "📈 *Reddit Топ-тикеры дня:*
-"
+    summary = "📈 *Reddit Топ-тикеры дня:*\n"
     for ticker, count in mentions[:3]:
         sentiment = analyze_sentiment(ticker, count)
         summary += f"\n*{ticker}* — {count} упоминаний\n{sentiment}\n"
