@@ -1,48 +1,74 @@
 import logging
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-import pytz
 import os
-from crypto_monitor import run_crypto_analysis
-from ipo_monitor import run_ipo_monitor
-from reddit_monitor import run_reddit_monitor
+import requests
+import openai
+from telegram import Bot
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я AI-инвестор бот. Буду держать тебя в курсе новостей IPO, крипты и Reddit 🚀")
+bot = Bot(token=BOT_TOKEN)
+openai.api_key = OPENAI_API_KEY
 
-def job():
+logger = logging.getLogger(__name__)
+
+def fetch_reddit_posts():
+    url = "https://www.reddit.com/r/wallstreetbets/new.json?limit=100"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        logger.info("🚀 Запуск мониторинга крипты, IPO и Reddit...")
-        run_crypto_analysis()
-        run_ipo_monitor()
-        run_reddit_monitor()  # Пока может быть заглушка
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()["data"]["children"]
+        else:
+            logger.warning("⚠️ Ошибка запроса Reddit: %s", response.status_code)
     except Exception as e:
-        logger.error(f"❌ Ошибка в job(): {e}")
+        logger.error("❌ Ошибка получения данных с Reddit: %s", e)
+    return []
 
-def main():
-    logger.info("🤖 AI-инвестор бот запущен!")
+def extract_mentions(posts):
+    mention_counts = {}
+    for post in posts:
+        text = post["data"].get("title", "") + " " + post["data"].get("selftext", "")
+        for keyword in REDDIT_KEYWORDS:
+            if keyword.upper() in text.upper():
+                mention_counts[keyword] = mention_counts.get(keyword, 0) + 1
+    return sorted(mention_counts.items(), key=lambda x: x[1], reverse=True)
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
+def analyze_sentiment(ticker, mentions):
+    prompt = (
+        f"Reddit обсуждение тикера {ticker} упоминается {mentions} раз.
+"
+        f"Проанализируй общий тон обсуждений и инвестиционное настроение."
+    )
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"❌ Ошибка анализа тональности {ticker}: {e}")
+        return f"Ошибка анализа для {ticker}."
 
-    # Сразу первый запуск job
-    job()
+def run_reddit_monitor():
+    posts = fetch_reddit_posts()
+    if not posts:
+        bot.send_message(chat_id=CHAT_ID, text="⚠️ Нет свежих данных с Reddit.")
+        return
 
-    # Запуск job каждый день в 21:00 по МСК
-    moscow_tz = pytz.timezone("Europe/Moscow")
-    scheduler = BackgroundScheduler(timezone=moscow_tz)
-    trigger = CronTrigger(hour=21, minute=0, timezone=moscow_tz)
-    scheduler.add_job(job, trigger=trigger)
-    scheduler.start()
+    mentions = extract_mentions(posts)
+    if not mentions:
+        bot.send_message(chat_id=CHAT_ID, text="❗️ Ничего не обсуждается из заданных тикеров.")
+        return
 
-    application.run_polling()
+    summary = "📈 *Reddit Топ-тикеры дня:*
+"
+    for ticker, count in mentions[:3]:
+        sentiment = analyze_sentiment(ticker, count)
+        summary += f"\n*{ticker}* — {count} упоминаний\n{sentiment}\n"
 
-if __name__ == "__main__":
-    main()
+    bot.send_message(chat_id=CHAT_ID, text=summary, parse_mode="Markdown")
