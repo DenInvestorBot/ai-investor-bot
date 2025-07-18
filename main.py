@@ -2,10 +2,16 @@ import logging
 import os
 import requests
 import openai
-from telegram import Bot
+from telegram import Bot, Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from apscheduler.schedulers.background import BackgroundScheduler
+from pytz import timezone
 
-REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# Переменные окружения
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -13,8 +19,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 bot = Bot(token=BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
-logger = logging.getLogger(__name__)
+REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
 
+# ===== Reddit Монитор =====
 def fetch_reddit_posts():
     url = "https://www.reddit.com/r/wallstreetbets/new.json?limit=100"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -70,3 +77,43 @@ def run_reddit_monitor():
         summary += f"\n*{ticker}* — {count} упоминаний\n{sentiment}\n"
 
     bot.send_message(chat_id=CHAT_ID, text=summary, parse_mode="Markdown")
+
+# ===== Команды Telegram =====
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("👋 Привет! Я AI-инвестор бот. Пиши /help для списка команд.")
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("""
+/start — Приветствие
+/help — Список команд
+/status — Проверка работоспособности
+    """)
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("✅ Бот работает. Мониторинг активен.")
+
+# ===== Планировщик =====
+def job():
+    try:
+        logger.info("🚀 Запуск мониторинга крипты, IPO и Reddit...")
+        run_reddit_monitor()
+    except Exception as e:
+        logger.error(f"❌ Ошибка в job(): {e}")
+
+# ===== Запуск приложения =====
+def main():
+    logger.info("🤖 AI-инвестор бот запущен!")
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", help_command))
+    app.add_handler(CommandHandler("status", status))
+
+    scheduler = BackgroundScheduler(timezone=timezone("UTC"))
+    scheduler.add_job(job, 'cron', hour=21, minute=0)
+    scheduler.start()
+
+    job()  # Первый запуск сразу
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
