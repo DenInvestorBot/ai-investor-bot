@@ -1,47 +1,46 @@
-import logging
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-import pytz
 import os
-import asyncio
-from crypto_monitor import run_crypto_analysis
-from ipo_monitor import run_ipo_monitor
-from reddit_monitor import run_reddit_monitor
+import requests
+import logging
+import schedule
+import time
+from telegram import Bot
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+bot = Bot(token=BOT_TOKEN)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Храним ID последних криптовалют
+seen_ids = set()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я AI-инвестор бот. Буду держать тебя в курсе новостей IPO, крипты и Reddit 🚀")
-
-def job():
+def fetch_new_coins():
     try:
-        logger.info("🚀 Запуск мониторинга крипты, IPO и Reddit...")
-        run_crypto_analysis()
-        run_ipo_monitor()
-        run_reddit_monitor()
+        url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
+        response = requests.get(url)
+        coins = response.json()
+
+        new_coins = []
+        for coin in coins[-5:]:  # Смотрим последние 5 (можно больше)
+            if coin["id"] not in seen_ids:
+                seen_ids.add(coin["id"])
+                new_coins.append(coin)
+
+        for coin in new_coins:
+            msg = f"🆕 Новая криптовалюта на CoinGecko:\n\n🔸 Название: {coin['name']}\n🔹 Символ: {coin['symbol']}\n🔗 ID: {coin['id']}"
+            bot.send_message(chat_id=CHAT_ID, text=msg)
+
     except Exception as e:
-        logger.error(f"❌ Ошибка в job(): {e}")
+        logger.error(f"Ошибка при получении данных: {e}")
 
-def main():
-    logger.info("🤖 AI-инвестор бот запущен!")
+def main_loop():
+    schedule.every(5).minutes.do(fetch_new_coins)
+    logger.info("Бот запущен и следит за новыми криптовалютами...")
 
-    application = ApplicationBuilder().token(BOT_TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
-    job()
-
-    moscow_tz = pytz.timezone("Europe/Moscow")
-    scheduler = BackgroundScheduler(timezone=moscow_tz)
-    trigger = CronTrigger(hour=21, minute=0, timezone=moscow_tz)
-    scheduler.add_job(job, trigger=trigger)
-    scheduler.start()
-
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    main_loop()
