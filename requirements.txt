@@ -1,0 +1,5 @@
+python-telegram-bot==20.3
+apscheduler==3.6.3
+requests==2.32.4
+openai==1.17.0
+pytz==2025.2
