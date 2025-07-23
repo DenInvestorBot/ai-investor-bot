@@ -7,8 +7,8 @@ CHAT_ID = os.getenv("CHAT_ID")
 bot = Bot(token=BOT_TOKEN)
 
 def fetch_ipo_data():
-    # Тут должен быть реальный источник IPO. Сейчас — заглушка.
-    return []
+    # Заглушка с примером — просто для теста!
+    return ["Acme Corp (ACME) — 2025-07-24", "QuantumX (QTX) — 2025-07-25"]
 
 def run_ipo_monitor():
     ipos = fetch_ipo_data()
