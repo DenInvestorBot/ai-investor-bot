@@ -9,7 +9,6 @@ from crypto_monitor import run_crypto_analysis
 from ipo_monitor import run_ipo_monitor
 from reddit_monitor import run_reddit_monitor
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -18,7 +17,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=BOT_TOKEN)
 
-# ===== Команды Telegram =====
+# ===== Telegram команды =====
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👋 Привет! Я AI-инвестор бот.\nТвой chat_id: {update.message.chat_id}\nПиши /help для списка команд."
@@ -32,7 +31,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Бот работает. Мониторинг активен.")
 
-# ===== Планировщик =====
 def job():
     try:
         logger.info("🚀 Запуск мониторинга крипты, IPO и Reddit...")
@@ -50,9 +48,9 @@ def main():
     app.add_handler(CommandHandler("status", status))
 
     scheduler = BackgroundScheduler(timezone=timezone("UTC"))
-    # Тестовая рассылка каждые 2 минуты (ПОТОМ УДАЛИШЬ!)
+    # Тестовая рассылка каждые 2 минуты (после проверки можешь убрать эту строку!)
     scheduler.add_job(job, 'interval', minutes=2)
-    # Основная рассылка (в 21:00 каждый день)
+    # Основная рассылка (раз в день в 21:00 UTC)
     scheduler.add_job(job, 'cron', hour=21, minute=0)
     scheduler.start()
 
