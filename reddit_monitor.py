@@ -1,19 +1,19 @@
-import os
 import praw
 from telegram import Bot
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
+BOT_TOKEN = "ТОКЕН_ТВОЕГО_БОТА"  # Подставь свой токен
+CHAT_ID = 1634571706  # Твой chat_id
 
-REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
-REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
-REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
+REDDIT_CLIENT_ID = "REDDIT_CLIENT_ID"  # Подставь свой reddit client_id
+REDDIT_CLIENT_SECRET = "REDDIT_CLIENT_SECRET"  # Подставь свой reddit client_secret
+REDDIT_USER_AGENT = "ai-investor-bot/1.0 by u/According-Stable4487"
 
 bot = Bot(token=BOT_TOKEN)
 
 REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
 
 def run_reddit_monitor():
+    bot.send_message(chat_id=CHAT_ID, text="📈 Тестовое сообщение от reddit_monitor!")  # <-- Явная проверка
     reddit = praw.Reddit(
         client_id=REDDIT_CLIENT_ID,
         client_secret=REDDIT_CLIENT_SECRET,
