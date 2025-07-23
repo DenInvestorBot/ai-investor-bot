@@ -1,4 +1,3 @@
-import requests
 import os
 from telegram import Bot
 
@@ -7,7 +6,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 bot = Bot(token=BOT_TOKEN)
 
 def fetch_ipo_data():
-    # Заглушка с примером — просто для теста!
+    # Для теста два фиктивных IPO, чтобы видеть рассылку
     return ["Acme Corp (ACME) — 2025-07-24", "QuantumX (QTX) — 2025-07-25"]
 
 def run_ipo_monitor():
