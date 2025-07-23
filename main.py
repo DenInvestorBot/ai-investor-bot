@@ -8,7 +8,7 @@ from crypto_monitor import run_crypto_analysis
 from ipo_monitor import run_ipo_monitor
 from reddit_monitor import run_reddit_monitor
 
-BOT_TOKEN = "7913819667:AAFDNAsoSgwA6Y_eTc1zuaP1LoLWNJTLJcQ"  # Подставь свой актуальный токен
+BOT_TOKEN = "7913819667:AAGf0vL8sX7zRnwozm7AFhEyHVN0plMOjus"  # Подставь свой актуальный токен
 CHAT_ID = 1634571706  # Жестко твой chat_id
 
 logging.basicConfig(level=logging.INFO)
