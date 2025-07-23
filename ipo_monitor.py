@@ -1,6 +1,6 @@
 from telegram import Bot
 
-BOT_TOKEN = "7913819667:AAFDNAsoSgwA6Y_eTc1zuaP1LoLWNJTLJcQ"  # Подставь свой токен
+BOT_TOKEN = "7913819667:AAGf0vL8sX7zRnwozm7AFhEyHVN0plMOjus"  # Подставь свой токен
 CHAT_ID = 1634571706  # Твой chat_id
 
 bot = Bot(token=BOT_TOKEN)
