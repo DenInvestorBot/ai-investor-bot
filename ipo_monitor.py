@@ -1,18 +1,26 @@
 import os
-from telegram import Bot
+import requests
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
-bot = Bot(token=BOT_TOKEN)
+
+def send_to_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=data)
 
 def fetch_ipo_data():
-    # Для теста: фиктивные IPO, чтобы видеть рассылку
+    # Для теста: фиктивные IPO
     return ["Acme Corp (ACME) — 2025-07-24", "QuantumX (QTX) — 2025-07-25"]
 
 def run_ipo_monitor():
     ipos = fetch_ipo_data()
     if not ipos:
-        bot.send_message(chat_id=CHAT_ID, text="⚠️ Сегодня нет новых IPO или произошла ошибка при получении данных.")
+        send_to_telegram("⚠️ Сегодня нет новых IPO или произошла ошибка при получении данных.")
     else:
         for ipo in ipos:
-            bot.send_message(chat_id=CHAT_ID, text=f"📈 Новое IPO: {ipo}")
+            send_to_telegram(f"📈 Новое IPO: {ipo}")
