@@ -15,14 +15,17 @@ def send_to_telegram(message):
         "text": message,
         "parse_mode": "Markdown"
     }
-    requests.post(url, data=data)
+    try:
+        requests.post(url, data=data, timeout=10)
+    except Exception as e:
+        print(f"❌ Ошибка при отправке в Telegram: {e}")
 
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
     response = requests.get(url)
     if response.ok:
         coins = response.json()
-        return coins[-5:]
+        return coins[-2:]  # Снизим нагрузку — анализируем только 2 последних монеты
     return []
 
 def analyze_coin(coin_id):
@@ -48,11 +51,15 @@ def analyze_coin(coin_id):
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=500
+            max_tokens=400
         )
         return name, response.choices[0].message.content
+    except openai.RateLimitError:
+        send_to_telegram("⚠️ OpenAI: превышен лимит запросов. Попробуй позже или снизь частоту анализа.")
+        return name, "⚠️ Анализ временно невозможен: превышен лимит OpenAI."
     except Exception as e:
-        return name, f"Ошибка анализа: {e}"
+        send_to_telegram(f"❌ Ошибка OpenAI: {e}")
+        return name, f"❌ Ошибка OpenAI: {e}"
 
 def run_crypto_analysis():
     try:
