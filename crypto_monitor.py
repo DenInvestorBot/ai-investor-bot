@@ -1,12 +1,14 @@
 import requests
 import openai
+import os
 from telegram import Bot
 
-BOT_TOKEN = ""  # Подставь свой токен
-CHAT_ID = 1634571706  # Твой chat_id
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = int(os.getenv("CHAT_ID"))
 
 bot = Bot(token=BOT_TOKEN)
-openai.api_key = "OPENAI_API_KEY"  # Подставь свой ключ OpenAI
+openai.api_key = OPENAI_API_KEY
 
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
@@ -48,7 +50,6 @@ def send_to_telegram(message):
 
 def run_crypto_analysis():
     try:
-        send_to_telegram("🪙 Тестовое сообщение от crypto_monitor!")  # <-- Явная проверка
         coins = fetch_new_coins()
         for coin in coins:
             coin_id = coin["id"]
