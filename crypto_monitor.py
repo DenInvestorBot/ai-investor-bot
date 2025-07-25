@@ -1,14 +1,21 @@
 import requests
 import openai
 import os
-from telegram import Bot
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
 
-bot = Bot(token=BOT_TOKEN)
 openai.api_key = OPENAI_API_KEY
+
+def send_to_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=data)
 
 def fetch_new_coins():
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
@@ -37,16 +44,15 @@ def analyze_coin(coin_id):
         "- Should investors follow or avoid it?"
     )
 
-    response = openai.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=500
-    )
-
-    return name, response.choices[0].message.content
-
-def send_to_telegram(message):
-    bot.send_message(chat_id=CHAT_ID, text=message, parse_mode="Markdown")
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=500
+        )
+        return name, response.choices[0].message.content
+    except Exception as e:
+        return name, f"Ошибка анализа: {e}"
 
 def run_crypto_analysis():
     try:
@@ -56,4 +62,4 @@ def run_crypto_analysis():
             name, analysis = analyze_coin(coin_id)
             send_to_telegram(f"🪙 *{name}*\n{analysis}")
     except Exception as e:
-        print(f"❌ Ошибка в run_crypto_analysis: {e}")
+        send_to_telegram(f"❌ Ошибка в run_crypto_analysis: {e}")
