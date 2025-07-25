@@ -45,7 +45,6 @@ def main():
     app.add_handler(CommandHandler("status", status))
 
     scheduler = BackgroundScheduler(timezone=timezone("UTC"))
-    scheduler.add_job(job, 'interval', minutes=2)  # тестовая рассылка (уберёшь, когда убедишься что всё ОК)
     scheduler.add_job(job, 'cron', hour=21, minute=0)
     scheduler.start()
 
