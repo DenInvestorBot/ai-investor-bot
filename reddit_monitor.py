@@ -1,6 +1,6 @@
 import os
 import praw
-from telegram import Bot
+import requests
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID"))
@@ -9,7 +9,14 @@ REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
 REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
-bot = Bot(token=BOT_TOKEN)
+def send_to_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, data=data)
 
 REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
 
@@ -27,9 +34,9 @@ def run_reddit_monitor():
             if keyword.upper() in text.upper():
                 mention_counts[keyword] = mention_counts.get(keyword, 0) + 1
     if not mention_counts:
-        bot.send_message(chat_id=CHAT_ID, text="❗️ Ничего не обсуждается из заданных тикеров.")
+        send_to_telegram("❗️ Ничего не обсуждается из заданных тикеров.")
         return
     summary = "📈 *Reddit Топ-тикеры дня:*\n"
     for ticker, count in sorted(mention_counts.items(), key=lambda x: x[1], reverse=True)[:3]:
         summary += f"\n*{ticker}* — {count} упоминаний"
-    bot.send_message(chat_id=CHAT_ID, text=summary, parse_mode="Markdown")
+    send_to_telegram(summary)
