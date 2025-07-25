@@ -1,6 +1,5 @@
 import logging
 import os
-from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone
@@ -10,25 +9,23 @@ from ipo_monitor import run_ipo_monitor
 from reddit_monitor import run_reddit_monitor
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))  # убедись, что это число!
+CHAT_ID = int(os.getenv("CHAT_ID"))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=BOT_TOKEN)
-
 # ===== Telegram команды =====
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👋 Привет! Я AI-инвестор бот.\nТвой chat_id: {update.message.chat_id}\nПиши /help для списка команд."
     )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def help_command(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "/start — Приветствие\n/help — Список команд\n/status — Проверка работоспособности"
     )
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def status(update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Бот работает. Мониторинг активен.")
 
 def job():
@@ -48,9 +45,7 @@ def main():
     app.add_handler(CommandHandler("status", status))
 
     scheduler = BackgroundScheduler(timezone=timezone("UTC"))
-    # Для теста: каждые 2 минуты (можно убрать позже)
-    scheduler.add_job(job, 'interval', minutes=2)
-    # Основная рассылка — ежедневно в 21:00 (UTC)
+    scheduler.add_job(job, 'interval', minutes=2)  # тестовая рассылка (уберёшь, когда убедишься что всё ОК)
     scheduler.add_job(job, 'cron', hour=21, minute=0)
     scheduler.start()
 
