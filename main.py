@@ -1,5 +1,4 @@
 import os
-
 print("DEBUG: TELEGRAM_TOKEN =", os.getenv("TELEGRAM_TOKEN"))
 print("DEBUG: CHAT_ID =", os.getenv("CHAT_ID"))
 print("DEBUG: OPENAI_API_KEY =", os.getenv("OPENAI_API_KEY"))
