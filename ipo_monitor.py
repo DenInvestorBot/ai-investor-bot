@@ -1,76 +1,78 @@
-import os
 import requests
-import openai
+import datetime
+from openai import OpenAI
+from telegram import Bot
+from config import TELEGRAM_TOKEN, CHAT_ID, OPENAI_API_KEY
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+bot = Bot(token=TELEGRAM_TOKEN)
+openai = OpenAI(api_key=OPENAI_API_KEY)
 
-def send_to_telegram(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        requests.post(url, data=data, timeout=10)
-    except Exception as e:
-        print(f"❌ Ошибка при отправке в Telegram: {e}")
+# Пример API-источника — заменить на свой
+IPO_API_URL = "https://financialmodelingprep.com/api/v3/ipo_calendar?apikey=YOUR_API_KEY"
 
-def fetch_ipo_data():
-    """
-    Здесь — пример с реальными (или тестовыми) данными.
-    Реальный парсер можешь подставить по аналогии.
-    Каждый IPO — tuple: (name, ticker, date, sector, cap, description)
-    """
-    return [
-        ("Acme Corp", "ACME", "2025-07-24", "Tech", 1_000_000_000, "Acme разрабатывает инновационные платформы для автоматизации бизнеса."),
-        ("QuantumX", "QTX", "2025-07-25", "Healthcare", 700_000_000, "QuantumX — биотехнологическая компания нового поколения, специализируется на ИИ и big data в медицине."),
-    ]
+def fetch_real_ipos():
+    today = datetime.date.today()
+    response = requests.get(IPO_API_URL)
+    ipos = response.json()
 
-def analyze_ipo(name, ticker, date, sector, cap, description):
+    real_ipos = []
+    for ipo in ipos:
+        try:
+            ipo_date = datetime.datetime.strptime(ipo["date"], "%Y-%m-%d").date()
+            if (
+                ipo_date <= today and
+                ipo.get("exchange") in ["NASDAQ", "NYSE"] and
+                ipo.get("price") and
+                ipo.get("ticker")
+            ):
+                real_ipos.append(ipo)
+        except Exception as e:
+            continue
+
+    return real_ipos
+
+def analyze_ipo(ipo):
     prompt = (
-        f"IPO: {name} ({ticker})\n"
-        f"Сектор: {sector}\n"
-        f"Капитализация: ${cap}\n"
-        f"Дата выхода на биржу: {date}\n"
-        f"Описание: {description}\n\n"
-        "Дай краткий инвестиционный анализ этого IPO:\n"
-        "- Какие перспективы?\n"
-        "- Насколько оно рискованное?\n"
-        "- Кому может быть интересно?\n"
-        "- Следует ли инвестировать или воздержаться?"
+        f"Компания: {ipo['companyName']}\n"
+        f"Тикер: {ipo['ticker']}\n"
+        f"Сектор: {ipo.get('sector', 'не указан')}\n"
+        f"Капитализация: неизвестна\n"
+        f"Описание: неизвестно\n\n"
+        f"Проанализируй инвестиционную привлекательность этой IPO.\n"
+        f"Дай краткий обзор перспектив, рисков и кому может быть интересно."
     )
+
     try:
-        response = openai.chat.completions.create(
+        completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=350
+            messages=[
+                {"role": "system", "content": "Ты финансовый аналитик."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4,
         )
-        return response.choices[0].message.content
-    except openai.RateLimitError:
-        send_to_telegram("⚠️ OpenAI: превышен лимит запросов по IPO. Попробуй позже.")
-        return "⚠️ Анализ временно невозможен: превышен лимит OpenAI."
+        return completion.choices[0].message.content
     except Exception as e:
-        send_to_telegram(f"❌ Ошибка AI-анализа IPO: {e}")
-        return f"❌ Ошибка AI-анализа IPO: {e}"
+        return "AI-анализ временно недоступен."
 
-def run_ipo_monitor():
-    ipos = fetch_ipo_data()
+def send_ipo_report():
+    ipos = fetch_real_ipos()
     if not ipos:
-        send_to_telegram("⚠️ Сегодня нет новых IPO или произошла ошибка при получении данных.")
-    else:
-        for name, ticker, date, sector, cap, description in ipos:
-            analysis = analyze_ipo(name, ticker, date, sector, cap, description)
-            msg = (
-                f"📈 *{name}* ({ticker})\n"
-                f"Сектор: {sector}\n"
-                f"Капитализация: ${cap}\n"
-                f"Дата IPO: {date}\n"
-                f"Описание: {description}\n\n"
-                f"*AI-Анализ:*\n{analysis}"
-            )
-            send_to_telegram(msg)
+        bot.send_message(chat_id=CHAT_ID, text="Сегодня не было новых IPO на бирже.")
+        return
 
+    for ipo in ipos:
+        text = (
+            f"📈 {ipo['companyName']} ({ipo['ticker']})\n"
+            f"Дата IPO: {ipo['date']}\n"
+            f"Биржа: {ipo['exchange']}\n"
+            f"Цена размещения: {ipo['price']}\n"
+            f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
+        )
+
+        analysis = analyze_ipo(ipo)
+        full_message = text + analysis
+        bot.send_message(chat_id=CHAT_ID, text=full_message)
+
+if __name__ == "__main__":
+    send_ipo_report()
