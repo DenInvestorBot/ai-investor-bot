@@ -4,24 +4,6 @@ import os
 import openai
 from telegram import Bot
 
-# Получаем переменные окружения
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# Проверка на обязательные значения
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN не установлен в переменных окружения")
-if not CHAT_ID:
-    raise ValueError("❌ CHAT_ID не установлен в переменных окружения")
-if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY не установлен в переменных окружения")
-
-# Преобразование типов
-CHAT_ID = int(CHAT_ID)
-bot = Bot(token=TELEGRAM_TOKEN)
-openai.api_key = OPENAI_API_KEY
-
 # API для IPO (укажи свой ключ в ссылке)
 IPO_API_URL = "https://financialmodelingprep.com/api/v3/ipo_calendar?apikey=YOUR_API_KEY"
 
@@ -49,7 +31,9 @@ def fetch_real_ipos():
 
     return real_ipos
 
-def analyze_ipo(ipo):
+def analyze_ipo(ipo, openai_api_key):
+    openai.api_key = openai_api_key
+
     prompt = (
         f"Компания: {ipo['companyName']}\n"
         f"Тикер: {ipo['ticker']}\n"
@@ -72,6 +56,21 @@ def analyze_ipo(ipo):
         return f"⚠️ AI-анализ недоступен: {e}"
 
 def run_ipo_monitor():
+    # Загружаем переменные только при вызове
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+    CHAT_ID = os.getenv("CHAT_ID")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+    if not TELEGRAM_TOKEN:
+        raise ValueError("❌ TELEGRAM_TOKEN не установлен в окружении")
+    if not CHAT_ID:
+        raise ValueError("❌ CHAT_ID не установлен в окружении")
+    if not OPENAI_API_KEY:
+        raise ValueError("❌ OPENAI_API_KEY не установлен в окружении")
+
+    CHAT_ID = int(CHAT_ID)
+    bot = Bot(token=TELEGRAM_TOKEN)
+
     ipos = fetch_real_ipos()
     if not ipos:
         bot.send_message(chat_id=CHAT_ID, text="Сегодня не было новых IPO на бирже.")
@@ -85,6 +84,6 @@ def run_ipo_monitor():
             f"Цена размещения: {ipo['price']}\n"
             f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
         )
-        analysis = analyze_ipo(ipo)
+        analysis = analyze_ipo(ipo, OPENAI_API_KEY)
         full_message = message + analysis
         bot.send_message(chat_id=CHAT_ID, text=full_message)
