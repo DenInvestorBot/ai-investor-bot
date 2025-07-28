@@ -1,3 +1,8 @@
+import os
+
+print("DEBUG: TELEGRAM_TOKEN =", os.getenv("TELEGRAM_TOKEN"))
+print("DEBUG: CHAT_ID =", os.getenv("CHAT_ID"))
+print("DEBUG: OPENAI_API_KEY =", os.getenv("OPENAI_API_KEY"))
 from apscheduler.schedulers.blocking import BlockingScheduler
 from ipo_monitor import run_ipo_monitor
 from crypto_monitor import run_crypto_analysis
