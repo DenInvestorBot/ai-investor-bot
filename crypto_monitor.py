@@ -4,15 +4,24 @@ import os
 import json
 from time import sleep
 
-# ENV-переменные
+# Получаем переменные окружения
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
+CHAT_ID = os.getenv("CHAT_ID")
 
-# OpenAI ключ
+# Валидация переменных
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY не установлен в переменных окружения.")
+if not BOT_TOKEN:
+    raise ValueError("❌ BOT_TOKEN не установлен в переменных окружения.")
+if not CHAT_ID:
+    raise ValueError("❌ CHAT_ID не установлен в переменных окружения.")
+CHAT_ID = int(CHAT_ID)
+
+# Инициализация OpenAI
 openai.api_key = OPENAI_API_KEY
 
-# Файл для отслеживания уже обработанных монет
+# Файл для хранения обработанных монет
 SEEN_FILE = "coins_seen.json"
 
 def send_to_telegram(message):
@@ -87,17 +96,14 @@ def run_crypto_analysis():
             send_to_telegram("🕵️‍♂️ Нет новых криптовалют на CoinGecko.")
             return
 
-        for coin in new_coins[:2]:  # Анализируем максимум 2 монеты в день
+        for coin in new_coins[:2]:  # максимум 2 монеты
             coin_id = coin["id"]
             name, analysis = analyze_coin(coin_id)
             send_to_telegram(f"🪙 *{name}*\n{analysis}")
             seen_ids.add(coin_id)
-            sleep(1)  # чтобы не получить блокировку по лимиту API
+            sleep(1)
 
         save_seen_ids(seen_ids)
 
     except Exception as e:
         send_to_telegram(f"❌ Ошибка в run_crypto_analysis: {e}")
-
-if __name__ == "__main__":
-    run_crypto_analysis()
