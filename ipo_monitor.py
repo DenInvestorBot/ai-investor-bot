@@ -4,15 +4,25 @@ import os
 import openai
 from telegram import Bot
 
-# Переменные из окружения
+# Получаем переменные окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID"))
+CHAT_ID = os.getenv("CHAT_ID")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# Проверка на обязательные значения
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN не установлен в переменных окружения")
+if not CHAT_ID:
+    raise ValueError("❌ CHAT_ID не установлен в переменных окружения")
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY не установлен в переменных окружения")
+
+# Преобразование типов
+CHAT_ID = int(CHAT_ID)
 bot = Bot(token=TELEGRAM_TOKEN)
 openai.api_key = OPENAI_API_KEY
 
-# API для IPO (замени на свой источник)
+# API для IPO (укажи свой ключ в ссылке)
 IPO_API_URL = "https://financialmodelingprep.com/api/v3/ipo_calendar?apikey=YOUR_API_KEY"
 
 def fetch_real_ipos():
