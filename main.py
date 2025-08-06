@@ -2,6 +2,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 import pytz
 from ipo_monitor import run_ipo_monitor
 from crypto_monitor import run_crypto_analysis
+from reddit_monitor import run_reddit_monitor
+from status_check import run_status_check
 
 scheduler = BlockingScheduler(timezone=pytz.UTC)
 
@@ -18,6 +20,12 @@ def scheduled_tasks():
         run_crypto_analysis()
     except Exception as e:
         print(f"❌ Ошибка в криптоанализе: {e}")
+
+    try:
+        print("⏰ Запуск мониторинга Reddit...")
+        run_reddit_monitor()
+    except Exception as e:
+        print(f"❌ Ошибка в Reddit-мониторе: {e}")
 
 if __name__ == "__main__":
     print("✅ Планировщик стартовал (ежедневно в 21:00 UTC)")
