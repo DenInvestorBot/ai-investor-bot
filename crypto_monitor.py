@@ -4,33 +4,21 @@ import os
 import json
 from time import sleep
 
-# Получаем переменные окружения
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# Валидация переменных
-if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY не установлен в переменных окружения.")
-if not BOT_TOKEN:
-    raise ValueError("❌ BOT_TOKEN не установлен в переменных окружения.")
-if not CHAT_ID:
-    raise ValueError("❌ CHAT_ID не установлен в переменных окружения.")
-CHAT_ID = int(CHAT_ID)
+if not OPENAI_API_KEY or not BOT_TOKEN or not CHAT_ID:
+    raise ValueError("❌ Проверь OPENAI_API_KEY, BOT_TOKEN, CHAT_ID")
 
-# Инициализация OpenAI
+CHAT_ID = int(CHAT_ID)
 openai.api_key = OPENAI_API_KEY
 
-# Файл для хранения обработанных монет
 SEEN_FILE = "coins_seen.json"
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
         requests.post(url, data=data, timeout=10)
     except Exception as e:
@@ -47,14 +35,17 @@ def save_seen_ids(ids):
         json.dump(list(ids), f)
 
 def fetch_new_coins():
-    url = "https://api.coingecko.com/api/v3/coins/list?include_platform=false"
-    response = requests.get(url)
+    print("🔎 Получение списка новых монет...")
+    url = "https://api.coingecko.com/api/v3/coins/markets"
+    params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 100, "page": 1}
+    response = requests.get(url, params=params)
     if response.ok:
         return response.json()
     return []
 
-def analyze_coin(coin_id):
+def analyze_coin(coin):
     try:
+        coin_id = coin["id"]
         info = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}").json()
         name = info.get("name", "")
         description = info.get("description", {}).get("en", "")
@@ -79,28 +70,29 @@ def analyze_coin(coin_id):
             max_tokens=400,
             temperature=0.4
         )
-        return name, response.choices[0].message.content
 
-    except openai.RateLimitError:
-        return coin_id, "⚠️ OpenAI: превышен лимит запросов. Попробуй позже."
+        if response.choices and response.choices[0].message:
+            return name, response.choices[0].message.content
+        else:
+            return name, "⚠️ OpenAI не вернул осмысленный ответ."
+
     except Exception as e:
-        return coin_id, f"❌ Ошибка OpenAI: {e}"
+        return coin["name"], f"❌ Ошибка OpenAI: {e}"
 
 def run_crypto_analysis():
     try:
         seen_ids = load_seen_ids()
         coins = fetch_new_coins()
-        new_coins = [coin for coin in coins if coin["id"] not in seen_ids]
+        new_coins = [coin for coin in coins if coin["id"] not in seen_ids and coin.get("market_cap", 0) > 1_000_000]
 
         if not new_coins:
-            send_to_telegram("🕵️‍♂️ Нет новых криптовалют на CoinGecko.")
+            send_to_telegram("🕵️‍♂️ Нет новых достойных криптовалют на CoinGecko.")
             return
 
-        for coin in new_coins[:2]:  # максимум 2 монеты
-            coin_id = coin["id"]
-            name, analysis = analyze_coin(coin_id)
+        for coin in new_coins[:2]:
+            name, analysis = analyze_coin(coin)
             send_to_telegram(f"🪙 *{name}*\n{analysis}")
-            seen_ids.add(coin_id)
+            seen_ids.add(coin["id"])
             sleep(1)
 
         save_seen_ids(seen_ids)
