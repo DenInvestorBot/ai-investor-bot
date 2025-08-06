@@ -11,11 +11,7 @@ REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT")
 
 def send_to_telegram(message):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
     requests.post(url, data=data)
 
 REDDIT_KEYWORDS = ["GME", "RBNE", "TSLA", "AAPL", "NVDA", "MSFT", "AMZN", "META", "NFLX", "AMD"]
@@ -31,7 +27,7 @@ def run_reddit_monitor():
     for post in posts:
         text = post.title + " " + getattr(post, "selftext", "")
         for keyword in REDDIT_KEYWORDS:
-            if keyword.upper() in text.upper():
+            if keyword.lower() in text.lower():
                 mention_counts[keyword] = mention_counts.get(keyword, 0) + 1
     if not mention_counts:
         send_to_telegram("❗️ Ничего не обсуждается из заданных тикеров.")
