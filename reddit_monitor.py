@@ -4,13 +4,9 @@ import traceback
 from typing import List, Dict
 
 import praw
-
 from crypto_monitor import send_to_telegram, _escape_markdown
 
 print("📄 [reddit_monitor] Модуль загружен")
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET")
@@ -22,11 +18,8 @@ DEFAULT_TICKERS = "GME,RBNE,TSLA,AAPL,NVDA,MSFT,AMZN,META,NFLX,AMD"
 TICKERS: List[str] = [t.strip().upper() for t in os.getenv("REDDIT_TICKERS", DEFAULT_TICKERS).split(",") if t.strip()]
 
 def _compile_patterns(tickers: List[str]) -> Dict[str, re.Pattern]:
-    patterns = {}
-    for t in tickers:
-        # \b\$?TSLA\b — учитываем $TSLA и границы слова
-        patterns[t] = re.compile(rf"\b\$?{re.escape(t)}\b", flags=re.IGNORECASE)
-    return patterns
+    # учитываем $TSLA и границы слова
+    return {t: re.compile(rf"\b\$?{re.escape(t)}\b", flags=re.IGNORECASE) for t in tickers}
 
 def _count_mentions_in_text(text: str, patterns: Dict[str, re.Pattern]):
     counts = {}
@@ -77,7 +70,6 @@ def run_reddit_monitor():
             except Exception:
                 print(f"⚠️ [reddit_monitor] Ошибка при обходе r/{sub}:")
                 traceback.print_exc()
-                # продолжаем по другим сабам
                 continue
     except Exception:
         print("❌ [reddit_monitor] Общая ошибка при сборе данных по Reddit:")
