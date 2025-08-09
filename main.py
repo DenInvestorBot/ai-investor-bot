@@ -32,7 +32,7 @@ def scheduled_tasks():
         print("⏰ Запуск анализа IPO...")
         run_ipo_monitor()
         print("✅ IPO анализ завершён")
-    except Exception as e:
+    except Exception:
         print("❌ Ошибка в IPO анализе:")
         traceback.print_exc()
 
@@ -40,7 +40,7 @@ def scheduled_tasks():
         print("⏰ Запуск анализа криптовалют...")
         run_crypto_analysis()
         print("✅ Криптоанализ завершён")
-    except Exception as e:
+    except Exception:
         print("❌ Ошибка в криптоанализе:")
         traceback.print_exc()
 
@@ -48,7 +48,7 @@ def scheduled_tasks():
         print("⏰ Запуск мониторинга Reddit...")
         run_reddit_monitor()
         print("✅ Reddit мониторинг завершён")
-    except Exception as e:
+    except Exception:
         print("❌ Ошибка в Reddit-мониторинге:")
         traceback.print_exc()
 
@@ -56,7 +56,7 @@ if __name__ == "__main__":
     try:
         print("✅ Планировщик стартовал (ежедневно в 21:00 Europe/Riga)")
         scheduler.start()
-    except Exception as e:
+    except Exception:
         print("❌ Ошибка при старте планировщика:")
         traceback.print_exc()
         sys.exit(1)
