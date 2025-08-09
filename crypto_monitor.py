@@ -1,10 +1,13 @@
 import os
 import json
 import re
+import traceback
 from time import sleep
 
 import requests
 from openai import OpenAI
+
+print("📄 [crypto_monitor] Модуль загружен")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -18,72 +21,69 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 SEEN_FILE = "coins_seen.json"
 
-# --------- Telegram helpers ---------
 def _escape_markdown(text: str) -> str:
-    # Безопасное экранирование для Markdown
-    # Экранируем самые частые проблемные символы
     return re.sub(r'([_*[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
 def send_to_telegram(message: str):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
     try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
         requests.post(url, data=data, timeout=15)
-    except Exception as e:
-        print(f"❌ Ошибка при отправке в Telegram: {e}")
+        print(f"📨 [crypto_monitor] Отправлено в Telegram: {message[:60]}...")
+    except Exception:
+        print("❌ [crypto_monitor] Ошибка при отправке в Telegram:")
+        traceback.print_exc()
 
-# --------- Seen IDs persistence ---------
 def load_seen_ids():
-    if os.path.exists(SEEN_FILE):
-        try:
+    try:
+        if os.path.exists(SEEN_FILE):
             with open(SEEN_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
-        except Exception:
-            return set()
+                ids = set(json.load(f))
+                print(f"📂 [crypto_monitor] Загружено {len(ids)} известных монет")
+                return ids
+    except Exception:
+        print("⚠️ [crypto_monitor] Не удалось загрузить seen_ids:")
+        traceback.print_exc()
     return set()
 
 def save_seen_ids(ids):
     try:
         with open(SEEN_FILE, "w", encoding="utf-8") as f:
             json.dump(list(ids), f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"⚠️ Не удалось сохранить {SEEN_FILE}: {e}")
+        print(f"💾 [crypto_monitor] Сохранено {len(ids)} монет в seen_ids")
+    except Exception:
+        print("⚠️ [crypto_monitor] Не удалось сохранить seen_ids:")
+        traceback.print_exc()
 
-# --------- CoinGecko ---------
 def fetch_top_market_coins():
-    """
-    Это не 'новые' монеты, а топ по капе.
-    Оставляем как есть (по твоей логике), но с таймаутом и защитой.
-    """
-    print("🔎 Получение списка монет (market_cap_desc)...")
+    print("🔎 [crypto_monitor] Получение списка монет...")
     url = "https://api.coingecko.com/api/v3/coins/markets"
     params = {"vs_currency": "usd", "order": "market_cap_desc", "per_page": 100, "page": 1}
     try:
         response = requests.get(url, params=params, timeout=20)
         if response.ok:
-            return response.json()
-    except Exception as e:
-        print(f"❌ CoinGecko ошибка: {e}")
+            coins = response.json()
+            print(f"✅ [crypto_monitor] Получено {len(coins)} монет")
+            return coins
+        print(f"⚠️ [crypto_monitor] Ошибка ответа CoinGecko: {response.status_code}")
+    except Exception:
+        print("❌ [crypto_monitor] Ошибка при запросе CoinGecko:")
+        traceback.print_exc()
     return []
 
 def fetch_coin_details(coin_id: str):
+    print(f"🔍 [crypto_monitor] Получение деталей монеты {coin_id}")
     try:
-        r = requests.get(
-            f"https://api.coingecko.com/api/v3/coins/{coin_id}",
-            params={"localization": "false"},
-            timeout=20
-        )
+        r = requests.get(f"https://api.coingecko.com/api/v3/coins/{coin_id}",
+                         params={"localization": "false"}, timeout=20)
         if r.ok:
             return r.json()
-    except Exception as e:
-        print(f"❌ CoinGecko details ошибка: {e}")
+        print(f"⚠️ [crypto_monitor] Не удалось получить {coin_id}: {r.status_code}")
+    except Exception:
+        print(f"❌ [crypto_monitor] Ошибка при получении {coin_id}:")
+        traceback.print_exc()
     return {}
 
-# --------- AI ---------
 def analyze_coin(coin):
     try:
         coin_id = coin.get("id")
@@ -93,60 +93,47 @@ def analyze_coin(coin):
         market_data = info.get("market_data", {}) or {}
         market_cap = (market_data.get("market_cap", {}) or {}).get("usd", 0)
         volume = (market_data.get("total_volume", {}) or {}).get("usd", 0)
-        homepage = ""
-        try:
-            homepage = (info.get("links", {}) or {}).get("homepage", [""])[0] or ""
-        except Exception:
-            pass
 
         prompt = (
-            "You are an investment analyst. Give a concise, actionable view.\n"
-            "Return max 7 concise bullet points in English.\n\n"
-            f"Name: {name}\n"
-            f"Market Cap (USD): {market_cap}\n"
-            f"24h Volume (USD): {volume}\n"
-            f"Website: {homepage}\n"
-            f"Description: {description}\n\n"
-            "Focus on: utility, traction, token economics, key risks, red flags, "
-            "and whether it’s worth putting on a watchlist."
+            f"Name: {name}\nMarket Cap (USD): {market_cap}\nVolume (USD): {volume}\nDescription: {description}\n"
+            "Give a short investment analysis."
         )
 
+        print(f"🤖 [crypto_monitor] AI-анализ монеты {name}")
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             max_tokens=400,
             temperature=0.4,
         )
+        return name, completion.choices[0].message.content.strip()
+    except Exception:
+        print(f"❌ [crypto_monitor] Ошибка при анализе монеты {coin.get('id')}:")
+        traceback.print_exc()
+        return coin.get("name", "Unknown"), "Ошибка анализа"
 
-        content = completion.choices[0].message.content.strip() if completion.choices else ""
-        return name, (content or "⚠️ AI не вернул осмысленный ответ.")
-    except Exception as e:
-        return coin.get("name", "Unknown"), f"❌ Ошибка AI: {e}"
-
-# --------- Orchestrator ---------
 def run_crypto_analysis():
+    print("🚀 [crypto_monitor] Запуск анализа криптовалют...")
     try:
         seen_ids = load_seen_ids()
         coins = fetch_top_market_coins()
-
-        # Твоя логика: считаем 'новыми достойными' те, кого ещё не отправляли и у кого капа > $1M
         new_coins = [
-            c for c in coins
-            if c.get("id") not in seen_ids and (c.get("market_cap") or 0) > 1_000_000
+            c for c in coins if c.get("id") not in seen_ids and (c.get("market_cap") or 0) > 1_000_000
         ]
+        print(f"📊 [crypto_monitor] Найдено {len(new_coins)} новых монет")
 
         if not new_coins:
-            send_to_telegram(_escape_markdown("🕵️‍♂️ Нет новых достойных криптовалют на CoinGecko."))
+            send_to_telegram(_escape_markdown("🕵️‍♂️ Нет новых достойных криптовалют"))
             return
 
-        for coin in new_coins[:2]:  # ограничим до 2, как у тебя
+        for coin in new_coins[:2]:
             name, analysis = analyze_coin(coin)
-            msg = f"🪙 *{_escape_markdown(name)}*\n{_escape_markdown(analysis)}"
-            send_to_telegram(msg)
+            send_to_telegram(f"🪙 *{_escape_markdown(name)}*\n{_escape_markdown(analysis)}")
             seen_ids.add(coin.get("id"))
             sleep(1)
 
         save_seen_ids(seen_ids)
-
-    except Exception as e:
-        send_to_telegram(_escape_markdown(f"❌ Ошибка в run_crypto_analysis: {e}"))
+        print("✅ [crypto_monitor] Анализ криптовалют завершён")
+    except Exception:
+        print("❌ [crypto_monitor] Ошибка в run_crypto_analysis:")
+        traceback.print_exc()
