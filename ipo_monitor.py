@@ -1,21 +1,29 @@
 import os
 import datetime
+import traceback
 import requests
 from openai import OpenAI
 
-from crypto_monitor import send_to_telegram, _escape_markdown  # используем единую отправку в TG
+from crypto_monitor import send_to_telegram, _escape_markdown
+
+print("📄 [ipo_monitor] Модуль загружен")
 
 IPO_API_KEY = os.getenv("IPO_API_KEY")
 IPO_API_URL = f"https://financialmodelingprep.com/api/v3/ipo_calendar?apikey={IPO_API_KEY}"
 
 def fetch_real_ipos():
+    print("🔎 [ipo_monitor] Запрос списка IPO...")
     today = datetime.date.today()
     try:
         r = requests.get(IPO_API_URL, timeout=20)
         if not r.ok:
+            print(f"⚠️ [ipo_monitor] Ошибка ответа API IPO: {r.status_code}")
             return []
         ipos = r.json() or []
+        print(f"✅ [ipo_monitor] Получено записей: {len(ipos)}")
     except Exception:
+        print("❌ [ipo_monitor] Сбой при запросе IPO:")
+        traceback.print_exc()
         return []
 
     real_ipos = []
@@ -31,7 +39,10 @@ def fetch_real_ipos():
             ):
                 real_ipos.append(ipo)
         except Exception:
+            # пропускаем битые записи, логировать не обязательно
             continue
+
+    print(f"📊 [ipo_monitor] Отфильтровано валидных IPO: {len(real_ipos)}")
     return real_ipos
 
 def analyze_ipo(ipo, client: OpenAI):
@@ -44,6 +55,7 @@ def analyze_ipo(ipo, client: OpenAI):
         f"Цена размещения: {ipo.get('price', 'не указана')}\n"
     )
     try:
+        print(f"🤖 [ipo_monitor] AI-анализ IPO: {ipo['companyName']} ({ipo['ticker']})")
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -54,27 +66,42 @@ def analyze_ipo(ipo, client: OpenAI):
             max_tokens=350,
         )
         return completion.choices[0].message.content.strip()
-    except Exception as e:
-        return f"⚠️ AI-анализ недоступен: {e}"
+    except Exception:
+        print("❌ [ipo_monitor] Ошибка AI при анализе IPO:")
+        traceback.print_exc()
+        return "⚠️ AI-анализ недоступен."
 
 def run_ipo_monitor():
+    print("🚀 [ipo_monitor] Запуск мониторинга IPO...")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     if not OPENAI_API_KEY:
-        raise ValueError("❌ Не задан OPENAI_API_KEY")
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    ipos = fetch_real_ipos()
-    if not ipos:
-        send_to_telegram(_escape_markdown("Сегодня не было новых IPO на бирже."))
+        msg = "❌ Не задан OPENAI_API_KEY"
+        print(f"[ipo_monitor] {msg}")
+        send_to_telegram(_escape_markdown(msg))
         return
 
-    for ipo in ipos:
-        header = (
-            f"📈 {ipo['companyName']} ({ipo['ticker']})\n"
-            f"Дата IPO: {ipo['date']}\n"
-            f"Биржа: {ipo['exchange']}\n"
-            f"Цена размещения: {ipo['price']}\n"
-            f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
-        )
-        analysis = analyze_ipo(ipo, client)
-        send_to_telegram(_escape_markdown(header + analysis))
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    try:
+        ipos = fetch_real_ipos()
+        if not ipos:
+            send_to_telegram(_escape_markdown("Сегодня не было новых IPO на бирже."))
+            print("ℹ️ [ipo_monitor] Нет подходящих IPO")
+            return
+
+        for ipo in ipos:
+            header = (
+                f"📈 {ipo['companyName']} ({ipo['ticker']})\n"
+                f"Дата IPO: {ipo['date']}\n"
+                f"Биржа: {ipo['exchange']}\n"
+                f"Цена размещения: {ipo['price']}\n"
+                f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
+            )
+            analysis = analyze_ipo(ipo, client)
+            msg = header + analysis
+            send_to_telegram(_escape_markdown(msg))
+            print(f"📨 [ipo_monitor] Сообщение отправлено: {ipo['companyName']} ({ipo['ticker']})")
+        print("✅ [ipo_monitor] Мониторинг IPO завершён")
+    except Exception:
+        print("❌ [ipo_monitor] Ошибка в run_ipo_monitor:")
+        traceback.print_exc()
