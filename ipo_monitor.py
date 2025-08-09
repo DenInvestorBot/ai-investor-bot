@@ -39,7 +39,6 @@ def fetch_real_ipos():
             ):
                 real_ipos.append(ipo)
         except Exception:
-            # пропускаем битые записи, логировать не обязательно
             continue
 
     print(f"📊 [ipo_monitor] Отфильтровано валидных IPO: {len(real_ipos)}")
@@ -100,8 +99,4 @@ def run_ipo_monitor():
             analysis = analyze_ipo(ipo, client)
             msg = header + analysis
             send_to_telegram(_escape_markdown(msg))
-            print(f"📨 [ipo_monitor] Сообщение отправлено: {ipo['companyName']} ({ipo['ticker']})")
-        print("✅ [ipo_monitor] Мониторинг IPO завершён")
-    except Exception:
-        print("❌ [ipo_monitor] Ошибка в run_ipo_monitor:")
-        traceback.print_exc()
+            print(f"📨 [i]()
