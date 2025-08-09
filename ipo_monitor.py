@@ -1,107 +1,85 @@
-import os
-import datetime
-import traceback
 import requests
-from openai import OpenAI
-
-from crypto_monitor import send_to_telegram, _escape_markdown
-
-print("[ipo_monitor] module loaded")
+import datetime
+import os
+import openai
+from telegram import Bot
 
 IPO_API_KEY = os.getenv("IPO_API_KEY")
 IPO_API_URL = f"https://financialmodelingprep.com/api/v3/ipo_calendar?apikey={IPO_API_KEY}"
 
 def fetch_real_ipos():
-    print("[ipo_monitor] fetching IPO list...")
     today = datetime.date.today()
-    try:
-        r = requests.get(IPO_API_URL, timeout=20)
-        if not r.ok:
-            print(f"[ipo_monitor] IPO API response error: {r.status_code}")
-            return []
-        ipos = r.json() or []
-        print(f"[ipo_monitor] received records: {len(ipos)}")
-    except Exception:
-        print("[ipo_monitor] request to IPO API failed:")
-        traceback.print_exc()
+    response = requests.get(IPO_API_URL)
+    if not response.ok:
         return []
 
+    ipos = response.json()
     real_ipos = []
+
     for ipo in ipos:
         try:
             ipo_date = datetime.datetime.strptime(ipo["date"], "%Y-%m-%d").date()
             if (
-                ipo_date <= today
-                and ipo.get("exchange") in {"NASDAQ", "NYSE"}
-                and ipo.get("price")
-                and ipo.get("ticker")
-                and ipo.get("companyName")
+                ipo_date <= today and
+                ipo.get("exchange") in ["NASDAQ", "NYSE"] and
+                ipo.get("price") and
+                ipo.get("ticker")
             ):
                 real_ipos.append(ipo)
         except Exception:
             continue
 
-    print(f"[ipo_monitor] valid IPOs after filter: {len(real_ipos)}")
     return real_ipos
 
-def analyze_ipo(ipo, client: OpenAI):
+def analyze_ipo(ipo, openai_api_key):
+    openai.api_key = openai_api_key
+
     prompt = (
-        "Ты финансовый аналитик. Сформируй короткий аналитический вывод по IPO.\n"
-        "Максимум 6 сжатых пунктов. Отдельно отметь ключевые риски.\n\n"
         f"Компания: {ipo['companyName']}\n"
         f"Тикер: {ipo['ticker']}\n"
         f"Сектор: {ipo.get('sector', 'не указан')}\n"
-        f"Цена размещения: {ipo.get('price', 'не указана')}\n"
+        f"Цена размещения: {ipo.get('price', 'не указана')}\n\n"
+        "Проанализируй инвестиционную привлекательность этой IPO. "
+        "Укажи плюсы, риски и кому может быть интересно."
     )
+
     try:
-        print(f"[ipo_monitor] running AI analysis: {ipo['companyName']} ({ipo['ticker']})")
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+        completion = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Ты финансовый аналитик."},
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.4,
-            max_tokens=350,
         )
-        return completion.choices[0].message.content.strip()
-    except Exception:
-        print("[ipo_monitor] AI analysis failed:")
-        traceback.print_exc()
-        return "⚠️ AI-анализ недоступен."
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ AI-анализ недоступен: {e}"
 
 def run_ipo_monitor():
-    print("[ipo_monitor] start")
+    TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
+    CHAT_ID = os.getenv("CHAT_ID")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-    if not OPENAI_API_KEY:
-        msg = "❌ Не задан OPENAI_API_KEY"
-        print(f"[ipo_monitor] {msg}")
-        send_to_telegram(_escape_markdown(msg))
+
+    if not TELEGRAM_TOKEN or not CHAT_ID or not OPENAI_API_KEY:
+        raise ValueError("❌ Не заданы переменные окружения")
+
+    CHAT_ID = int(CHAT_ID)
+    bot = Bot(token=TELEGRAM_TOKEN)
+
+    ipos = fetch_real_ipos()
+    if not ipos:
+        bot.send_message(chat_id=CHAT_ID, text="Сегодня не было новых IPO на бирже.")
         return
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    try:
-        ipos = fetch_real_ipos()
-        if not ipos:
-            send_to_telegram(_escape_markdown("Сегодня не было новых IPO на бирже."))
-            print("[ipo_monitor] no IPO found")
-            return
-
-        for ipo in ipos:
-            header = (
-                f"📈 {ipo['companyName']} ({ipo['ticker']})\n"
-                f"Дата IPO: {ipo['date']}\n"
-                f"Биржа: {ipo['exchange']}\n"
-                f"Цена размещения: {ipo['price']}\n"
-                f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
-            )
-            analysis = analyze_ipo(ipo, client)
-            msg = header + analysis
-            send_to_telegram(_escape_markdown(msg))
-            print(f"[ipo_monitor] sent: {ipo['companyName']} ({ipo['ticker']})")
-
-        print("[ipo_monitor] done")
-    except Exception:
-        print("[ipo_monitor] run_ipo_monitor failed:")
-        traceback.print_exc()
+    for ipo in ipos:
+        message = (
+            f"📈 {ipo['companyName']} ({ipo['ticker']})\n"
+            f"Дата IPO: {ipo['date']}\n"
+            f"Биржа: {ipo['exchange']}\n"
+            f"Цена размещения: {ipo['price']}\n"
+            f"Сектор: {ipo.get('sector', 'не указан')}\n\n"
+        )
+        analysis = analyze_ipo(ipo, OPENAI_API_KEY)
+        full_message = message + analysis
+        bot.send_message(chat_id=CHAT_ID, text=full_message)
