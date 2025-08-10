@@ -1,115 +1,123 @@
 # signals/advisor.py
-# Daily advisor logic (trend filter + candle trigger + ATR levels)
-from __future__ import annotations
-import numpy as np
 import pandas as pd
+import yfinance as yf
+import numpy as np
 
-__all__ = ["advise", "format_advice"]
-
-def ema(s: pd.Series, n: int) -> pd.Series:
-    return s.ewm(span=n, adjust=False).mean()
-
-def atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
-    h, l, c = df["high"], df["low"], df["close"]
-    pc = c.shift(1)
-    tr = pd.concat([(h - l), (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
-    return tr.rolling(n).mean()
-
-def slope(series: pd.Series, n: int = 5) -> pd.Series:
-    base = series.shift(n)
-    return (series - base) / (base.replace(0, np.nan))
-
-def bullish_engulf(o, h, l, c):
-    po, pc = o.shift(1), c.shift(1)
-    return (pc < po) & (c > o) & (o <= pc) & (c >= po)
-
-def bearish_engulf(o, h, l, c):
-    po, pc = o.shift(1), c.shift(1)
-    return (pc > po) & (c < o) & (o >= pc) & (c <= po)
-
-def hammer(o, h, l, c, tail=0.6):
-    body = (c - o).abs()
-    rng = (h - l).replace(0, np.nan)
-    lower = (np.minimum(o, c) - l)
-    upper = (h - np.maximum(o, c))
-    return (lower / rng >= tail) & (upper / rng <= 1 - tail) & (body / rng <= 0.4)
-
-def shooting_star(o, h, l, c, tail=0.6):
-    body = (c - o).abs()
-    rng = (h - l).replace(0, np.nan)
-    lower = (np.minimum(o, c) - l)
-    upper = (h - np.maximum(o, c))
-    return (upper / rng >= tail) & (lower / rng <= 1 - tail) & (body / rng <= 0.4)
-
-def advise(df: pd.DataFrame,
-           use_volume: bool = True,
-           vol_mult: float = 1.2,
-           sl_atr_mult: float = 1.5,
-           rr: float = 3.0) -> dict:
+def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
     """
-    Input: df with columns [open,high,low,close,volume] (closed candles only)
-    Output: dict with action & levels for the last candle
+    Загружает историю цен и строит простейший анализ свечей + тренда.
+    Возвращает dict с рекомендацией.
     """
-    required = {"open", "high", "low", "close", "volume"}
-    if not required.issubset(df.columns):
-        raise ValueError(f"df must have columns {required}")
+    df = yf.download(symbol, period=f"{lookback}d", interval=interval, progress=False)
+    if df.empty:
+        return None
 
-    o, h, l, c, v = [df[k].astype(float) for k in ["open", "high", "low", "close", "volume"]]
-    work = pd.DataFrame({"open": o, "high": h, "low": l, "close": c, "volume": v}).copy()
+    df["MA20"] = df["Close"].rolling(20).mean()
+    df["MA50"] = df["Close"].rolling(50).mean()
 
-    work["ema200"] = ema(c, 200)
-    work["ema50"] = ema(c, 50)
-    work["ema20"] = ema(c, 20)
-    work["atr"] = atr(work, 14)
-    if use_volume:
-        work["vma20"] = v.rolling(20).mean()
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-    i = len(work) - 1
-    if i < 210 or work[["ema200", "ema50", "ema20", "atr"]].iloc[i].isna().any():
-        return {"action": "wait", "reason": "недостаточно данных для надёжного сигнала"}
+    # Тренд
+    if last["MA20"] > last["MA50"]:
+        trend = "up"
+    elif last["MA20"] < last["MA50"]:
+        trend = "down"
+    else:
+        trend = "flat"
 
-    up = (c.iloc[i] > work["ema200"].iloc[i]) and \
-         (work["ema20"].iloc[i] > work["ema50"].iloc[i]) and \
-         (slope(work["ema20"]).iloc[i] > 0) and (slope(work["ema50"]).iloc[i] > 0)
+    # Свечной паттерн
+    body = last["Close"] - last["Open"]
+    body_prev = prev["Close"] - prev["Open"]
 
-    down = (c.iloc[i] < work["ema200"].iloc[i]) and \
-           (work["ema20"].iloc[i] < work["ema50"].iloc[i]) and \
-           (slope(work["ema20"]).iloc[i] < 0) and (slope(work["ema50"]).iloc[i] < 0)
+    action = "hold"
+    reason = "net signala"
 
-    vol_ok = True
-    if use_volume and not np.isnan(work["vma20"].iloc[i]):
-        vol_ok = v.iloc[i] > vol_mult * work["vma20"].iloc[i]
+    if trend == "up" and body > 0 and last["Close"] > prev["High"]:
+        action = "buy"
+        reason = "probitie vershiny na rostushchem trende"
+    elif trend == "down" and body < 0 and last["Close"] < prev["Low"]:
+        action = "sell"
+        reason = "probitie miniymuma na padaushem trende"
+    elif trend == "up" and body < 0:
+        action = "wait_pullback"
+        reason = "korrektsiya na rostushchem trende"
+    elif trend == "down" and body > 0:
+        action = "reduce_or_exit"
+        reason = "otkat na padaushem trende"
 
-    bull = (bullish_engulf(o, h, l, c) | hammer(o, h, l, c)).iloc[i]
-    bear = (bearish_engulf(o, h, l, c) | shooting_star(o, h, l, c)).iloc[i]
+    # Risk-менеджмент (SL/TP по ATR)
+    atr = (df["High"] - df["Low"]).rolling(14).mean().iloc[-1]
+    sl = None
+    tp = None
+    rr = None
 
-    atrv = float(work["atr"].iloc[i]); price = float(c.iloc[i])
+    if action in ["buy", "sell"]:
+        if action == "buy":
+            sl = last["Close"] - 1.5 * atr
+            tp = last["Close"] + 3 * atr
+        elif action == "sell":
+            sl = last["Close"] + 1.5 * atr
+            tp = last["Close"] - 3 * atr
 
-    if up and bull and vol_ok:
-        sl = price - sl_atr_mult * atrv
-        tp = price + rr * (price - sl)
-        return {"action": "buy", "trend": "up", "reason": "trend↑ + бычий паттерн" + (" + объём" if use_volume else ""),
-                "entry": price, "sl": sl, "tp": tp, "rr": rr}
+        rr = abs(tp - last["Close"]) / abs(last["Close"] - sl)
 
-    if down and bear and vol_ok:
-        sl = price + sl_atr_mult * atrv
-        tp = price - rr * (sl - price)
-        return {"action": "sell", "trend": "down", "reason": "trend↓ + медв. паттерн" + (" + объём" if use_volume else ""),
-                "entry": price, "sl": sl, "tp": tp, "rr": rr}
+    return {
+        "symbol": symbol,
+        "trend": trend,
+        "action": action,
+        "reason": reason,
+        "sl": sl,
+        "tp": tp,
+        "rr": rr,
+        "candle_time": last.name
+    }
 
-    if down and not bear:
-        return {"action": "reduce_or_exit", "trend": "down", "reason": "устойчивый даунтренд, свечного подтверждения нет"}
+def format_advice(symbol: str, timeframe: str, rec: dict) -> str:
+    t = pd.Timestamp(rec["candle_time"]).strftime("%Y-%m-%d")
+    a = rec.get("action", "hold")
+    reason = rec.get("reason", "—")
+    sl = rec.get("sl")
+    tp = rec.get("tp")
+    rr = rec.get("rr")
 
-    if up and not bull:
-        return {"action": "wait_pullback", "trend": "up", "reason": "тренд вверх, ждём подтверждения"}
-
-    return {"action": "wait", "reason": "нет совокупного сигнала"}
-
-def format_advice(symbol: str, timeframe: str, rec: dict, candle_time) -> str:
-    t = pd.Timestamp(candle_time).strftime("%Y-%m-%d")
-    a = rec.get("action", "wait")
     if a == "buy":
-        return (f"🤖 Советник · {symbol} · {timeframe}\n"
-                f"Рекомендация: ПОКУПАТЬ (тренд ↑)\n"
-                f"Причина: {rec['reason']}\n"
-                f"Уровни: SL={rec['sl']:.2f}, TP={rec['tp']:.2f} (R
+        return (
+            "Advisor · {symbol} · {tf}\n"
+            "Rekomendaciya: POKUPAT (trend up)\n"
+            "Prichina: {reason}\n"
+            "Urovni: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
+            "Svecha zakryta: {t}"
+        ).format(symbol=symbol, tf=timeframe, reason=reason, sl=sl, tp=tp, rr=rr, t=t)
+
+    if a == "sell":
+        return (
+            "Advisor · {symbol} · {tf}\n"
+            "Rekomendaciya: PRODAVAT/SHORT (trend down)\n"
+            "Prichina: {reason}\n"
+            "Urovni: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
+            "Svecha zakryta: {t}"
+        ).format(symbol=symbol, tf=timeframe, reason=reason, sl=sl, tp=tp, rr=rr, t=t)
+
+    if a == "reduce_or_exit":
+        return (
+            "Advisor · {symbol} · {tf}\n"
+            "Rekomendaciya: SNIZHAT POZICIIU/VIHODIT (trend down)\n"
+            "Prichina: {reason}\n"
+            "Svecha zakryta: {t}"
+        ).format(symbol=symbol, tf=timeframe, reason=reason, t=t)
+
+    if a == "wait_pullback":
+        return (
+            "Advisor · {symbol} · {tf}\n"
+            "Rekomendaciya: ZHDAT OTKATA (trend up)\n"
+            "Prichina: {reason}\n"
+            "Svecha zakryta: {t}"
+        ).format(symbol=symbol, tf=timeframe, reason=reason, t=t)
+
+    return (
+        "Advisor · {symbol} · {tf}\n"
+        "Rekomendaciya: NET DEISTVII\n"
+        "Prichina: {reason}\n"
+        "Svecha zakryta: {t}"
+    ).format(symbol=symbol, tf=timeframe, reason=reason, t=t)
