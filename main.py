@@ -60,3 +60,7 @@ if __name__ == "__main__":
         print("❌ Ошибка при старте планировщика:")
         traceback.print_exc()
         sys.exit(1)
+from scheduler.advisor_scheduler import register_advisor_jobs
+
+# ... там, где у тебя уже создан scheduler ...
+register_advisor_jobs(scheduler)  # TSLA и GME, ежедневно в 23:10 по Риге (пн–пт)
