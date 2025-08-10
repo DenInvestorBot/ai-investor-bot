@@ -4,3 +4,8 @@ requests==2.31.0
 apscheduler==3.10.4
 pytz==2024.1
 praw==7.7.1
+yfinance>=0.2.40
+pandas>=1.5
+numpy>=1.23
+# если нет APScheduler:
+APScheduler>=3.10
