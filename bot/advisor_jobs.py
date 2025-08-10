@@ -45,9 +45,8 @@ def send_advice_for(symbol: str):
     rec = advise(df, use_volume=True, sl_atr_mult=1.5, rr=3.0)
     msg = format_advice(symbol, TIMEFRAME, rec, candle_time=last_ts)
 
-    # Try your bot's notifier first
     try:
-        from bot.notify import send_text
+        from bot.notify import send_text  # твой существующий отправщик
         send_text(msg)
     except Exception:
         print(msg)
