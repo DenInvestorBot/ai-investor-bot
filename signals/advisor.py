@@ -3,10 +3,9 @@ import pandas as pd
 import yfinance as yf
 import numpy as np
 
-def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
+def advise(symbol: str, interval: str = "1d", lookback: int = 60):
     """
-    Загружает историю цен и строит простейший анализ свечей + тренда.
-    Возвращает dict с рекомендацией.
+    Анализирует свечи и тренд, возвращает dict с рекомендацией.
     """
     df = yf.download(symbol, period=f"{lookback}d", interval=interval, progress=False)
     if df.empty:
@@ -26,7 +25,7 @@ def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
     else:
         trend = "flat"
 
-    # Свечной паттерн
+    # Свечной анализ
     body = last["Close"] - last["Open"]
     body_prev = prev["Close"] - prev["Open"]
 
@@ -38,7 +37,7 @@ def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
         reason = "probitie vershiny na rostushchem trende"
     elif trend == "down" and body < 0 and last["Close"] < prev["Low"]:
         action = "sell"
-        reason = "probitie miniymuma na padaushem trende"
+        reason = "probitie minimuma na padaushem trende"
     elif trend == "up" and body < 0:
         action = "wait_pullback"
         reason = "korrektsiya na rostushchem trende"
@@ -46,7 +45,7 @@ def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
         action = "reduce_or_exit"
         reason = "otkat na padaushem trende"
 
-    # Risk-менеджмент (SL/TP по ATR)
+    # SL/TP расчет
     atr = (df["High"] - df["Low"]).rolling(14).mean().iloc[-1]
     sl = None
     tp = None
@@ -59,7 +58,6 @@ def get_candle_analysis(symbol: str, interval: str = "1d", lookback: int = 60):
         elif action == "sell":
             sl = last["Close"] + 1.5 * atr
             tp = last["Close"] - 3 * atr
-
         rr = abs(tp - last["Close"]) / abs(last["Close"] - sl)
 
     return {
