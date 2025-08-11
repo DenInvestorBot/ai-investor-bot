@@ -3,30 +3,35 @@ import json
 import re
 import traceback
 from time import sleep
-
 import requests
 from openai import OpenAI
 
 print("📄 [crypto_monitor] Модуль загружен")
 
+# ===== Настройка переменных окружения =====
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
+CHAT_ID = int(os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "0"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
 
-if not OPENAI_API_KEY or not BOT_TOKEN or not CHAT_ID:
-    raise ValueError("❌ Проверь переменные окружения: OPENAI_API_KEY, BOT_TOKEN, CHAT_ID")
+if not TELEGRAM_TOKEN or not CHAT_ID:
+    print("⚠️ [crypto_monitor] ВНИМАНИЕ: Не заданы TELEGRAM_TOKEN и/или CHAT_ID")
+if not OPENAI_API_KEY:
+    print("⚠️ [crypto_monitor] ВНИМАНИЕ: Не задан OPENAI_API_KEY — AI-анализ отключён")
 
-CHAT_ID = int(CHAT_ID)
-client = OpenAI(api_key=OPENAI_API_KEY)
-
+client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 SEEN_FILE = "coins_seen.json"
 
+# ===== Вспомогательные функции =====
 def _escape_markdown(text: str) -> str:
     return re.sub(r'([_*[\]()~`>#+\-=|{}.!])', r'\\\1', str(text))
 
 def send_to_telegram(message: str):
+    """Отправка сообщения в Telegram"""
+    if not TELEGRAM_TOKEN or not CHAT_ID:
+        print("❌ [crypto_monitor] Невозможно отправить сообщение — нет токена или chat_id")
+        return
     try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
         requests.post(url, data=data, timeout=15)
         print(f"📨 [crypto_monitor] Отправлено в Telegram: {message[:60]}...")
@@ -85,6 +90,7 @@ def fetch_coin_details(coin_id: str):
     return {}
 
 def analyze_coin(coin):
+    """AI-анализ монеты"""
     try:
         coin_id = coin.get("id")
         info = fetch_coin_details(coin_id)
@@ -99,6 +105,9 @@ def analyze_coin(coin):
             "Give a short investment analysis."
         )
 
+        if not client:
+            return name, "AI-анализ отключён (нет OPENAI_API_KEY)"
+
         print(f"🤖 [crypto_monitor] AI-анализ монеты {name}")
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -112,7 +121,8 @@ def analyze_coin(coin):
         traceback.print_exc()
         return coin.get("name", "Unknown"), "Ошибка анализа"
 
-def run_crypto_analysis():
+# ===== Главная функция (новое имя!) =====
+def run_crypto_monitor():
     print("🚀 [crypto_monitor] Запуск анализа криптовалют...")
     try:
         seen_ids = load_seen_ids()
@@ -135,5 +145,5 @@ def run_crypto_analysis():
         save_seen_ids(seen_ids)
         print("✅ [crypto_monitor] Анализ криптовалют завершён")
     except Exception:
-        print("❌ [crypto_monitor] Ошибка в run_crypto_analysis:")
+        print("❌ [crypto_monitor] Ошибка в run_crypto_monitor:")
         traceback.print_exc()
