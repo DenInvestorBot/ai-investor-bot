@@ -95,26 +95,39 @@ def format_advice(symbol: str, timeframe: str, rec: dict) -> str:
     rr = rec.get("rr")
 
     if a == "buy":
-        return (
-            "Advisor · {symbol} · {tf}\n"
-            "Рекомендация: ПОКУПАТЬ (тренд up)\n"
-            "Причина: {reason}\n"
-            "Уровни: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
-            "Свеча закрыта: {t}"
-        ).format(symbol=symbol, tf=timeframe, reason=reason, sl=sl, tp=tp, rr=rr, t=t)
+        return ("Advisor · {symbol} · {tf}\n"
+                "Рекомендация: ПОКУПАТЬ (тренд up)\n"
+                "Причина: {reason}\n"
+                "Уровни: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
+                "Свеча закрыта: {t}").format(
+                    symbol=symbol, tf=timeframe, reason=reason,
+                    sl=sl, tp=tp, rr=rr, t=t)
 
     if a == "sell":
-        return (
-            "Advisor · {symbol} · {tf}\n"
-            "Рекомендация: ПРОДАВАТЬ/SHORT (тренд down)\n"
-            "Причина: {reason}\n"
-            "Уровни: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
-            "Свеча закрыта: {t}"
-        ).format(symbol=symbol, tf=timeframe, reason=reason, sl=sl, tp=tp, rr=rr, t=t)
+        return ("Advisor · {symbol} · {tf}\n"
+                "Рекомендация: ПРОДАВАТЬ/SHORT (тренд down)\n"
+                "Причина: {reason}\n"
+                "Уровни: SL={sl:.2f}, TP={tp:.2f} (RR~{rr:.1f})\n"
+                "Свеча закрыта: {t}").format(
+                    symbol=symbol, tf=timeframe, reason=reason,
+                    sl=sl, tp=tp, rr=rr, t=t)
 
     if a == "reduce_or_exit":
-        return (
-            "Advisor · {symbol} · {tf}\n"
-            "Рекомендация: СНИЖАТЬ ПОЗИЦИЮ/ВЫХОДИТЬ (тренд down)\n"
+        return ("Advisor · {symbol} · {tf}\n"
+                "Рекомендация: СНИЖАТЬ ПОЗИЦИЮ/ВЫХОДИТЬ (тренд down)\n"
+                "Причина: {reason}\n"
+                "Свеча закрыта: {t}").format(
+                    symbol=symbol, tf=timeframe, reason=reason, t=t)
+
+    if a == "wait_pullback":
+        return ("Advisor · {symbol} · {tf}\n"
+                "Рекомендация: ЖДАТЬ ОТКАТА (тренд up)\n"
+                "Причина: {reason}\n"
+                "Свеча закрыта: {t}").format(
+                    symbol=symbol, tf=timeframe, reason=reason, t=t)
+
+    return ("Advisor · {symbol} · {tf}\n"
+            "Рекомендация: НЕТ ДЕЙСТВИЙ\n"
             "Причина: {reason}\n"
-            "Свеча закрыта: {t}"
+            "Свеча закрыта: {t}").format(
+                symbol=symbol, tf=timeframe, reason=reason, t=t)
