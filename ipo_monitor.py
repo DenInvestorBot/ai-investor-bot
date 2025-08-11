@@ -2,30 +2,25 @@ import os
 import requests
 import datetime
 from openai import OpenAI
-from telegram import Bot
 import traceback
+from crypto_monitor import send_to_telegram, _escape_markdown
 
 print("📄 [ipo_monitor] Модуль загружен")
 
-# ===== Настройка переменных окружения =====
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "0"))
+# ===== Переменные окружения =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 IPO_API_KEY = os.getenv("IPO_API_KEY")
 
-if not TELEGRAM_TOKEN or not CHAT_ID:
-    print("⚠️ [ipo_monitor] ВНИМАНИЕ: Не заданы TELEGRAM_TOKEN и/или CHAT_ID — сообщения в Telegram не будут отправляться")
 if not OPENAI_API_KEY:
-    print("⚠️ [ipo_monitor] ВНИМАНИЕ: Не задан OPENAI_API_KEY — AI-анализ IPO отключён")
+    print("⚠️ [ipo_monitor] OPENAI_API_KEY не задан — AI-анализ отключён")
 if not IPO_API_KEY:
-    print("⚠️ [ipo_monitor] ВНИМАНИЕ: Не задан IPO_API_KEY — данные IPO не будут получены")
+    print("⚠️ [ipo_monitor] IPO_API_KEY не задан — данные IPO не будут получены")
 
 IPO_API_URL = f"https://financialmodelingprep.com/api/v3/ipo_calendar?apikey={IPO_API_KEY}" if IPO_API_KEY else None
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# ===== Функции =====
+# ===== Получение IPO =====
 def fetch_real_ipos():
-    """Получение списка реальных IPO"""
     if not IPO_API_URL:
         print("❌ [ipo_monitor] Нет IPO_API_KEY — пропуск запроса")
         return []
@@ -57,8 +52,8 @@ def fetch_real_ipos():
         traceback.print_exc()
         return []
 
+# ===== AI-анализ =====
 def analyze_ipo(ipo):
-    """Анализ IPO с помощью OpenAI"""
     if not client:
         return "AI-анализ отключён (нет OPENAI_API_KEY)."
 
@@ -85,22 +80,13 @@ def analyze_ipo(ipo):
         print(f"❌ [ipo_monitor] Ошибка AI-анализа IPO {ipo['ticker']}: {e}")
         return f"⚠️ AI-анализ недоступен: {e}"
 
+# ===== Запуск =====
 def run_ipo_monitor():
-    """Запуск проверки и анализа IPO"""
     print("🚀 [ipo_monitor] Запуск мониторинга IPO...")
-
-    bot = None
-    if TELEGRAM_TOKEN and CHAT_ID:
-        try:
-            bot = Bot(token=TELEGRAM_TOKEN)
-        except Exception:
-            print("❌ [ipo_monitor] Ошибка инициализации Telegram-бота:")
-            traceback.print_exc()
 
     ipos = fetch_real_ipos()
     if not ipos:
-        if bot:
-            bot.send_message(chat_id=CHAT_ID, text="Сегодня не было новых IPO на бирже.")
+        send_to_telegram(_escape_markdown("Сегодня не было новых IPO на бирже."))
         print("ℹ️ [ipo_monitor] Новых IPO нет")
         return
 
@@ -114,12 +100,4 @@ def run_ipo_monitor():
         )
         analysis = analyze_ipo(ipo)
         full_message = message + analysis
-
-        if bot:
-            try:
-                bot.send_message(chat_id=CHAT_ID, text=full_message)
-            except Exception:
-                print("❌ [ipo_monitor] Ошибка отправки IPO в Telegram:")
-                traceback.print_exc()
-        else:
-            print(full_message)
+        send_to_telegram(_escape_markdown(full_message))
