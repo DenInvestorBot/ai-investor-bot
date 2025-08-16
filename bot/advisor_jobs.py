@@ -8,16 +8,15 @@ from signals.advisor import advise, format_advice
 log = logging.getLogger(__name__)
 print("📄 [advisor_jobs] Модуль загружен")
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID") or os.getenv("CHAT_ID")
 
 def _escape_markdown(text: str) -> str:
-    # Отправляем как plain text — экранирование не требуется, но оставим хук
     return text
 
 async def send_to_telegram(text: str) -> None:
     if not TELEGRAM_TOKEN or not ADMIN_CHAT_ID:
-        log.warning("send_to_telegram: missing TELEGRAM_BOT_TOKEN or ADMIN_CHAT_ID")
+        log.warning("send_to_telegram: missing TELEGRAM_BOT_TOKEN/BOT_TOKEN or ADMIN_CHAT_ID/CHAT_ID")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": int(ADMIN_CHAT_ID), "text": text}
@@ -29,7 +28,7 @@ async def send_to_telegram(text: str) -> None:
         log.exception("send_to_telegram failed")
 
 async def run_tsla_gme_daily_job():
-    """Запуск анализа и рекомендаций для TSLA и GME (асинхронно, без блокировок)"""
+    """Запуск анализа и рекомендаций для TSLA и GME (асинхронно)."""
     print("🚀 [advisor_jobs] Запуск дневного задания советника (TSLA, GME)")
     tickers = ["TSLA", "GME"]
     for symbol in tickers:
