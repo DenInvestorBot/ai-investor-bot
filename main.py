@@ -92,7 +92,6 @@ async def job_daily_summary(app: Application) -> None:
         from ipo_monitor import collect_ipos as collect_ipos
 
         parts = []
-
         try:
             r = await collect_reddit()
             parts.append(f"Reddit: {r}")
@@ -129,4 +128,34 @@ def main() -> None:
     application.add_handler(CommandHandler("summary_now", summary_now_cmd))
 
     # Планировщик с устойчивыми настройками
-    sch
+    scheduler = AsyncIOScheduler(timezone=TZ)
+
+    # 21:00 — ежедневная сводка
+    trigger = CronTrigger(hour=21, minute=0, jitter=30, timezone=TZ)
+    scheduler.add_job(
+        lambda: application.create_task(job_daily_summary(application)),
+        trigger=trigger,
+        id="daily_summary",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
+
+    # Регистрируем задачи советника (TSLA/GME)
+    try:
+        from advisor_scheduler import register_advisor_jobs
+        register_advisor_jobs(scheduler)  # 23:10 по умолчанию, пн–пт
+    except Exception:
+        log.exception("Failed to register advisor jobs")
+
+    scheduler.start()
+    application.bot_data["scheduler"] = scheduler
+
+    for j in scheduler.get_jobs():
+        log.info("Job %s scheduled; next_run_time=%s", j.id, j.next_run_time)
+
+    log.info("Starting bot (long polling)... TZ=%s", TZ)
+    application.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
