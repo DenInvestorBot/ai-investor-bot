@@ -8,5 +8,8 @@ yfinance==0.2.40
 pandas==2.2.2
 numpy==1.26.4
 
+# LLM-саммари
+openai>=1.40.0
+
 # Windows only (локальные тесты)
 tzdata>=2024.1 ; sys_platform == 'win32'
