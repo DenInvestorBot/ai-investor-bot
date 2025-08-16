@@ -19,11 +19,11 @@ log = logging.getLogger("main")
 
 # -------------------- ENV & TZ --------------------
 def require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
+    val = os.getenv(name)
+    if not val:
         log.error("Missing env var %s. Set it in Render → Settings → Environment.", name)
         sys.exit(1)
-    return value
+    return val
 
 def get_tz() -> ZoneInfo:
     tz_name = os.getenv("TZ", "Europe/Riga")
@@ -56,7 +56,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text: str
     try:
-        from status_check import build_status  # твой файл
+        from status_check import build_status
         text = await build_status(context)
     except Exception as e:
         log.exception("/status failed, fallback to basic status")
@@ -75,4 +75,58 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     if update.message:
         await update.message.reply_text(text)
 
-async def summary_now_cmd
+async def summary_now_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Ручной запуск ежедневной сводки для быстрой проверки
+    await job_daily_summary(context.application)
+    if update.message:
+        await update.message.reply_text("Сводка отправлена (если ADMIN_CHAT_ID задан).")
+
+# -------------------- ДЖОБЫ --------------------
+async def job_daily_summary(app: Application) -> None:
+    if ADMIN_CHAT_ID is None:
+        log.warning("ADMIN_CHAT_ID is not set; skip summary")
+        return
+    try:
+        from reddit_monitor import collect_signals as collect_reddit
+        from crypto_monitor import collect_new_coins as collect_coins
+        from ipo_monitor import collect_ipos as collect_ipos
+
+        parts = []
+
+        try:
+            r = await collect_reddit()
+            parts.append(f"Reddit: {r}")
+        except Exception:
+            log.exception("collect_reddit failed")
+            parts.append("Reddit: ошибка")
+
+        try:
+            c = await collect_coins()
+            parts.append(f"Крипто: {c}")
+        except Exception:
+            log.exception("collect_new_coins failed")
+            parts.append("Крипто: ошибка")
+
+        try:
+            i = await collect_ipos()
+            parts.append(f"IPO: {i}")
+        except Exception:
+            log.exception("collect_ipos failed")
+            parts.append("IPO: ошибка")
+
+        text = "\n".join(parts) or "Нет свежих данных"
+        await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Ежедневная сводка\n\n{text}")
+    except Exception:
+        log.exception("daily_summary failed")
+
+# -------------------- MAIN --------------------
+def main() -> None:
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Команды
+    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("status", status_cmd))
+    application.add_handler(CommandHandler("summary_now", summary_now_cmd))
+
+    # Планировщик с устойчивыми настройками
+    sch
