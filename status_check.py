@@ -17,7 +17,7 @@ def _get_tz() -> ZoneInfo:
 TZ = _get_tz()
 
 def _admin_status() -> str:
-    raw = os.getenv("ADMIN_CHAT_ID")
+    raw = os.getenv("ADMIN_CHAT_ID") or os.getenv("CHAT_ID")
     if not raw:
         return "no"
     try:
@@ -29,19 +29,16 @@ def _admin_status() -> str:
 async def build_status(context) -> str:
     lines = []
 
-    # Бот / getMe
     try:
         me = await context.bot.get_me()
         lines.append(f"Бот: @{getattr(me, 'username', None) or 'unknown'} ({me.id})")
-    except Exception as e:
+    except Exception:
         log.exception("get_me failed")
         lines.append("Бот: <не удалось получить getMe()>")
 
-    # Время
     now_tz = datetime.now(tz=TZ)
     lines.append(f"Серверное время: {now_tz:%Y-%m-%d %H:%M:%S %Z}")
 
-    # Планировщик и задачи
     sched = context.application.bot_data.get("scheduler")
     if not sched:
         lines += [
@@ -56,20 +53,17 @@ async def build_status(context) -> str:
     lines.append(f"Активных задач: {len(jobs)}")
     for j in jobs:
         nrt = j.next_run_time
+        nrt_str = "—"
         if nrt is not None:
             try:
-                nrt_local = nrt.astimezone(TZ)
-                nrt_str = nrt_local.strftime("%Y-%m-%d %H:%M:%S %Z")
+                nrt_str = nrt.astimezone(TZ).strftime("%Y-%m-%d %H:%M:%S %Z")
             except Exception:
                 nrt_str = str(nrt)
-        else:
-            nrt_str = "—"
         lines.append(f"• {j.id}: next={nrt_str}")
 
     lines.append(f"TZ: {TZ}")
     lines.append(f"ADMIN_CHAT_ID set: {_admin_status()}")
 
-    # Проверка наличия функций в ключевых модулях
     def _probe(mod_name: str, fn_name: str) -> str:
         try:
             m = __import__(mod_name, fromlist=[fn_name])
