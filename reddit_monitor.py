@@ -3,8 +3,10 @@ import os
 import asyncio
 import logging
 import random
-from typing import List, Dict, Any, Optional
+import re
+from typing import List, Dict, Any, Optional, Tuple
 from urllib.parse import quote_plus
+from collections import Counter
 
 import httpx
 
@@ -19,6 +21,8 @@ TICKERS: List[str] = [
 ]
 REDDIT_TIME = os.getenv("REDDIT_TIME", "day")  # day|week|month|year|all
 REDDIT_SEARCH_LIMIT = int(os.getenv("REDDIT_SEARCH_LIMIT", "5"))
+REDDIT_SUMMARY = os.getenv("REDDIT_SUMMARY", "1") not in ("0", "false", "False")
+REDDIT_SUMMARY_CHARS = int(os.getenv("REDDIT_SUMMARY_CHARS", "180"))
 
 # OAuth (userless) — если заданы, используем защищённый эндпоинт
 R_CID = os.getenv("REDDIT_CLIENT_ID")
@@ -32,7 +36,6 @@ _oauth_token: Optional[str] = None
 _oauth_expiry: float = 0.0
 
 async def _get_oauth_token() -> Optional[str]:
-    """Берём userless токен через client_credentials. Кэшируем до истечения."""
     import time
     global _oauth_token, _oauth_expiry
     if _oauth_token and time.time() < _oauth_expiry - 60:
@@ -94,53 +97,127 @@ async def _get_json(url: str, headers: Dict[str, str], *, retries: int = 3) -> D
             break
     return {}
 
-def _fmt_example(title: str, max_len: int = 80) -> str:
-    t = (title or "").replace("\n", " ").strip()
-    return (t[: max_len - 1] + "…") if len(t) > max_len else t
-
 # ---- Search (OAuth first, then public) ----
-async def _search_reddit_oauth(ticker: str) -> List[str]:
+def _extract_titles_texts(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    children = data.get("data", {}).get("children", [])
+    titles, texts = [], []
+    for it in children:
+        d = it.get("data", {}) or {}
+        t = d.get("title")
+        if t:
+            titles.append(t)
+        selftext = d.get("selftext") or ""
+        if selftext and len(texts) < REDDIT_SEARCH_LIMIT:
+            texts.append(selftext)
+        if len(titles) >= REDDIT_SEARCH_LIMIT:
+            break
+    return titles, texts
+
+async def _search_reddit_oauth(ticker: str) -> Tuple[List[str], List[str]]:
     token = await _get_oauth_token()
     if not token:
-        return []
+        return [], []
     q = quote_plus(ticker)
     url = f"https://oauth.reddit.com/search?q={q}&sort=new&t={quote_plus(REDDIT_TIME)}&limit={REDDIT_SEARCH_LIMIT}"
     headers = {"Authorization": f"Bearer {token}", "User-Agent": R_UA}
     data = await _get_json(url, headers)
-    children = data.get("data", {}).get("children", [])
-    return [it.get("data", {}).get("title") for it in children if it.get("data", {}).get("title")][:REDDIT_SEARCH_LIMIT]
+    return _extract_titles_texts(data)
 
-async def _search_reddit_public(ticker: str) -> List[str]:
+async def _search_reddit_public(ticker: str) -> Tuple[List[str], List[str]]:
     q = quote_plus(ticker)
     url = f"https://www.reddit.com/search.json?q={q}&sort=new&restrict_sr=0&t={quote_plus(REDDIT_TIME)}&limit={REDDIT_SEARCH_LIMIT}"
     headers = {"User-Agent": R_UA}
     data = await _get_json(url, headers)
-    children = data.get("data", {}).get("children", [])
-    return [it.get("data", {}).get("title") for it in children if it.get("data", {}).get("title")][:REDDIT_SEARCH_LIMIT]
+    return _extract_titles_texts(data)
 
-async def _search_reddit(ticker: str) -> List[str]:
-    # Пробуем OAuth, если есть ключи; иначе — публичный
+async def _search_reddit(ticker: str) -> Tuple[List[str], List[str]]:
     if R_CID and R_SEC:
-        titles = await _search_reddit_oauth(ticker)
+        titles, texts = await _search_reddit_oauth(ticker)
         if titles:
-            return titles
-        # если OAuth не дал — fallback на public
+            return titles, texts
     return await _search_reddit_public(ticker)
+
+# ---- Simple local summarizer (без внешних сервисов) ----
+_STOP = {
+    # en
+    "the","a","an","of","to","in","on","and","or","for","with","without","by","from","at","is","are","was","were",
+    "it","this","that","as","be","has","have","had","will","about","over","under","into","out","up","down","vs","&",
+    # ru
+    "и","в","во","на","с","со","у","к","от","за","до","по","из","для","без","над","под","о","об","как","что","это",
+    "а","но","же","ли","или","уже","бы","не","ни","да","то","же","там","тут","только","еще","есть","были","будет",
+}
+
+_POS_WORDS = {"buy","long","bull","call","squeeze","moon","green","breakout","рост","покупать","бычий","пробой"}
+_NEG_WORDS = {"sell","short","put","dump","red","bear","down","collapse","слив","шорт","медв","паден","продавать"}
+
+_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9$%+#@\-']+")
+
+def _tokens(text: str) -> List[str]:
+    return [t.lower() for t in _TOKEN_RE.findall(text)]
+
+def _top_phrases(texts: List[str], top_n: int = 3) -> List[str]:
+    # bigrams/trigrams из заголовков+кусочков selftext
+    words = [w for t in texts for w in _tokens(t) if w not in _STOP and len(w) > 2]
+    if not words:
+        return []
+    bigr = Counter([" ".join(pair) for pair in zip(words, words[1:])])
+    trgr = Counter([" ".join(tri) for tri in zip(words, words[1:], words[2:])])
+    # немного приоритезируем триграммы
+    mix = (trgr + Counter())  # copy
+    for k, v in bigr.items():
+        mix[k] += int(v * 0.6)
+    phrases = [p for p, _ in mix.most_common(5) if not any(ch.isdigit() for ch in p)]
+    return phrases[:top_n]
+
+def _sentiment_hint(texts: List[str]) -> Optional[str]:
+    w = [t.lower() for t in _TOKEN_RE.findall(" ".join(texts))]
+    pos = sum(any(p in token for p in _POS_WORDS) for token in w)
+    neg = sum(any(n in token for n in _NEG_WORDS) for token in w)
+    if pos == 0 and neg == 0:
+        return None
+    if pos > neg * 1.2:
+        return "тон скорее позитивный"
+    if neg > pos * 1.2:
+        return "тон скорее негативный"
+    return "тон нейтральный/смешанный"
+
+def _make_summary(titles: List[str], texts: List[str]) -> str:
+    if not titles:
+        return "нет свежих сигналов"
+    bucket = titles + [t[:240] for t in texts]  # берём кусочки selftext
+    phrases = _top_phrases(bucket, top_n=3)
+    senti = _sentiment_hint(bucket)
+    parts: List[str] = []
+    if phrases:
+        parts.append("ключевые темы: " + ", ".join(phrases))
+    if senti:
+        parts.append(senti)
+    s = " · ".join(parts) if parts else _short_example(titles)
+    # короче и компактнее
+    return s[:REDDIT_SUMMARY_CHARS]
+
+def _short_example(titles: List[str], max_len: int = 80) -> str:
+    t = (titles[0] or "").replace("\n", " ").strip()
+    return (t[: max_len - 1] + "…") if len(t) > max_len else t
 
 # ---- Public API ----
 async def collect_signals() -> str:
     """
-    'GME: 3 упоминаний (напр.: ...) | RBNE: нет свежих сигналов'
-    Любые сбои => "нет свежих сигналов" (причина в логах).
+    'GME: 5 упоминаний — ключевые темы: ... · тон скорее ... | RBNE: нет свежих сигналов'
+    Ошибки не валят процесс (логи остаются).
     """
     parts: List[str] = []
     for t in TICKERS:
         try:
-            posts = await _search_reddit(t)
-            if posts:
-                parts.append(f"{t}: {len(posts)} упоминаний (напр.: {_fmt_example(posts[0])})")
-            else:
+            titles, texts = await _search_reddit(t)
+            if not titles:
                 parts.append(f"{t}: нет свежих сигналов")
+                continue
+            if REDDIT_SUMMARY:
+                brief = _make_summary(titles, texts)
+                parts.append(f"{t}: {len(titles)} упоминаний — {brief}")
+            else:
+                parts.append(f"{t}: {len(titles)} упоминаний (напр.: {_short_example(titles)})")
         except Exception:
             log.exception("reddit search failed for %s", t)
             parts.append(f"{t}: нет свежих сигналов")
