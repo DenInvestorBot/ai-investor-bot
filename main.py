@@ -1,84 +1,74 @@
-import os
-import logging
-import time
-import pytz
-from apscheduler.schedulers.background import BackgroundScheduler
-from scheduler.advisor_scheduler import register_advisor_jobs
+import os, asyncio, logging
+from zoneinfo import ZoneInfo
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from telegram.ext import Application, CommandHandler
 
-# ===== Исправленные импорты =====
-from bot.advisor_jobs import run_tsla_gme_daily_job
-from crypto_monitor import run_crypto_monitor
-from ipo_monitor import run_ipo_monitor
-from reddit_monitor import run_reddit_monitor
-from status_check import run_status_check
-from telegram import Bot
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+log = logging.getLogger("main")
 
-print("📄 [main] Запуск бота...")
+TZ = ZoneInfo("Europe/Riga")
 
-# ===== Настройка переменных окружения =====
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("BOT_TOKEN")
-CHAT_ID = int(os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "0"))
+async def start_cmd(update, context):
+    await update.message.reply_text("Привет! Я на связи. Попробуй /status")
 
-if not TELEGRAM_TOKEN or CHAT_ID == 0:
-    print("❌ [main] TELEGRAM_TOKEN и/или CHAT_ID не заданы — бот не сможет отправлять сообщения")
-else:
-    print(f"✅ [main] TELEGRAM_TOKEN найден (начало: {TELEGRAM_TOKEN[:8]}...)")
-
-# ===== Логирование =====
-logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-log = logging.getLogger(__name__)
-
-# ===== Инициализация Telegram-бота =====
-bot = None
-if TELEGRAM_TOKEN and CHAT_ID:
+async def status_cmd(update, context):
     try:
-        bot = Bot(token=TELEGRAM_TOKEN)
-        log.info("🚀 Telegram-бот инициализирован")
+        from status_check import build_status
+        text = await build_status(context)
     except Exception as e:
-        log.error(f"❌ Ошибка инициализации Telegram-бота: {e}")
+        log.exception("/status failed")
+        text = f"Статус: ERROR — {e}"
+    await update.message.reply_text(text)
 
-# ===== Запуск планировщика =====
-scheduler = BackgroundScheduler(timezone=pytz.timezone("Europe/Riga"))
+async def job_daily_summary(app):
+    chat_id = os.getenv('ADMIN_CHAT_ID')
+    if not chat_id:
+        log.warning("ADMIN_CHAT_ID is not set; skip summary")
+        return
+    try:
+        from reddit_monitor import collect_signals as collect_reddit
+        from crypto_monitor import collect_new_coins as collect_coins
+        from ipo_monitor import collect_ipos as collect_ipos
 
-# ===== Запуск всех задач один раз при старте =====
-try:
-    run_crypto_monitor()
-except Exception as e:
-    log.error(f"[main] Ошибка при запуске run_crypto_monitor: {e}")
+        parts = []
+        r = await collect_reddit()
+        parts.append(f"Reddit: {r}")
+        c = await collect_coins()
+        parts.append(f"Крипто: {c}")
+        i = await collect_ipos()
+        parts.append(f"IPO: {i}")
 
-try:
-    run_ipo_monitor()
-except Exception as e:
-    log.error(f"[main] Ошибка при запуске run_ipo_monitor: {e}")
+        text = "\n".join(parts) or "Нет свежих данных"
+        await app.bot.send_message(chat_id=int(chat_id), text=f"Ежедневная сводка\n\n{text}")
+    except Exception:
+        log.exception("daily_summary failed")
 
-try:
-    run_reddit_monitor()
-except Exception as e:
-    log.error(f"[main] Ошибка при запуске run_reddit_monitor: {e}")
+async def main():
+    token = os.environ['TELEGRAM_BOT_TOKEN']
+    application = Application.builder().token(token).build()
 
-try:
-    run_status_check()
-except Exception as e:
-    log.error(f"[main] Ошибка при запуске run_status_check: {e}")
+    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("status", status_cmd))
 
-# ===== Регистрируем задачу советника =====
-try:
-    register_advisor_jobs(scheduler)
-except Exception as e:
-    log.error(f"[main] Ошибка при регистрации advisor_jobs: {e}")
-
-log.info("✅ Планировщик готов (ежедневно в 21:00 Europe/Riga)")
-
-try:
+    scheduler = AsyncIOScheduler(timezone=TZ)
+    scheduler.add_job(lambda: asyncio.create_task(job_daily_summary(application)),
+                      trigger='cron', hour=21, minute=0, id='daily_summary')
     scheduler.start()
-    log.info("🕒 Планировщик запущен")
-except Exception as e:
-    log.error(f"[main] Ошибка запуска планировщика: {e}")
+    application.bot_data['scheduler'] = scheduler
 
-# ===== Поддержка работы приложения =====
-try:
-    while True:
-        time.sleep(60)
-except KeyboardInterrupt:
-    log.info("⏹ Остановка бота по Ctrl+C")
-    scheduler.shutdown()
+    log.info("Starting bot (long polling)... TZ=Europe/Riga")
+    await application.initialize()
+    await application.start()
+    try:
+        await application.updater.start_polling(drop_pending_updates=True)
+        await asyncio.Event().wait()
+    finally:
+        await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
+
+if __name__ == "__main__":
+    asyncio.run(main())
