@@ -21,8 +21,12 @@ TICKERS: List[str] = [
 ]
 REDDIT_TIME = os.getenv("REDDIT_TIME", "day")  # day|week|month|year|all
 REDDIT_SEARCH_LIMIT = int(os.getenv("REDDIT_SEARCH_LIMIT", "5"))
-REDDIT_SUMMARY = os.getenv("REDDIT_SUMMARY", "1") not in ("0", "false", "False")
-REDDIT_SUMMARY_CHARS = int(os.getenv("REDDIT_SUMMARY_CHARS", "180"))
+
+# Настройка краткого анализа
+USE_LLM = (os.getenv("REDDIT_SUMMARY_LLM", "1") not in ("0", "false", "False")) and bool(os.getenv("OPENAI_API_KEY"))
+LLM_MODEL = os.getenv("REDDIT_SUMMARY_MODEL", "gpt-4o-mini")
+LLM_MAXTOK = int(os.getenv("REDDIT_SUMMARY_MAXTOK", "120"))
+SUMMARY_CHARS = int(os.getenv("REDDIT_SUMMARY_CHARS", "180"))  # итоговая длина строки
 
 # OAuth (userless) — если заданы, используем защищённый эндпоинт
 R_CID = os.getenv("REDDIT_CLIENT_ID")
@@ -108,7 +112,7 @@ def _extract_titles_texts(data: Dict[str, Any]) -> Tuple[List[str], List[str]]:
             titles.append(t)
         selftext = d.get("selftext") or ""
         if selftext and len(texts) < REDDIT_SEARCH_LIMIT:
-            texts.append(selftext)
+            texts.append(selftext[:400])
         if len(titles) >= REDDIT_SEARCH_LIMIT:
             break
     return titles, texts
@@ -137,33 +141,29 @@ async def _search_reddit(ticker: str) -> Tuple[List[str], List[str]]:
             return titles, texts
     return await _search_reddit_public(ticker)
 
-# ---- Simple local summarizer (без внешних сервисов) ----
+# ---- Local summarizer (fallback) ----
 _STOP = {
     # en
     "the","a","an","of","to","in","on","and","or","for","with","without","by","from","at","is","are","was","were",
     "it","this","that","as","be","has","have","had","will","about","over","under","into","out","up","down","vs","&",
     # ru
     "и","в","во","на","с","со","у","к","от","за","до","по","из","для","без","над","под","о","об","как","что","это",
-    "а","но","же","ли","или","уже","бы","не","ни","да","то","же","там","тут","только","еще","есть","были","будет",
+    "а","но","же","ли","или","уже","бы","не","ни","да","то","там","тут","только","еще","есть","были","будет",
 }
-
 _POS_WORDS = {"buy","long","bull","call","squeeze","moon","green","breakout","рост","покупать","бычий","пробой"}
 _NEG_WORDS = {"sell","short","put","dump","red","bear","down","collapse","слив","шорт","медв","паден","продавать"}
-
 _TOKEN_RE = re.compile(r"[A-Za-zА-Яа-я0-9$%+#@\-']+")
 
 def _tokens(text: str) -> List[str]:
     return [t.lower() for t in _TOKEN_RE.findall(text)]
 
 def _top_phrases(texts: List[str], top_n: int = 3) -> List[str]:
-    # bigrams/trigrams из заголовков+кусочков selftext
     words = [w for t in texts for w in _tokens(t) if w not in _STOP and len(w) > 2]
     if not words:
         return []
     bigr = Counter([" ".join(pair) for pair in zip(words, words[1:])])
     trgr = Counter([" ".join(tri) for tri in zip(words, words[1:], words[2:])])
-    # немного приоритезируем триграммы
-    mix = (trgr + Counter())  # copy
+    mix = (trgr + Counter())
     for k, v in bigr.items():
         mix[k] += int(v * 0.6)
     phrases = [p for p, _ in mix.most_common(5) if not any(ch.isdigit() for ch in p)]
@@ -181,10 +181,10 @@ def _sentiment_hint(texts: List[str]) -> Optional[str]:
         return "тон скорее негативный"
     return "тон нейтральный/смешанный"
 
-def _make_summary(titles: List[str], texts: List[str]) -> str:
+def _local_summary(titles: List[str], texts: List[str]) -> str:
     if not titles:
         return "нет свежих сигналов"
-    bucket = titles + [t[:240] for t in texts]  # берём кусочки selftext
+    bucket = titles + [t[:240] for t in texts]
     phrases = _top_phrases(bucket, top_n=3)
     senti = _sentiment_hint(bucket)
     parts: List[str] = []
@@ -192,19 +192,43 @@ def _make_summary(titles: List[str], texts: List[str]) -> str:
         parts.append("ключевые темы: " + ", ".join(phrases))
     if senti:
         parts.append(senti)
-    s = " · ".join(parts) if parts else _short_example(titles)
-    # короче и компактнее
-    return s[:REDDIT_SUMMARY_CHARS]
+    s = " · ".join(parts) if parts else (titles[0][:79] + "…") if len(titles[0]) > 80 else titles[0]
+    return s[:SUMMARY_CHARS]
 
-def _short_example(titles: List[str], max_len: int = 80) -> str:
-    t = (titles[0] or "").replace("\n", " ").strip()
-    return (t[: max_len - 1] + "…") if len(t) > max_len else t
+# ---- LLM summarizer (optional) ----
+async def _llm_summary(ticker: str, titles: List[str], texts: List[str]) -> Optional[str]:
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI()
+        # готовим компактный контент
+        joined = "\n".join(["• " + t for t in titles[:REDDIT_SEARCH_LIMIT]])
+        if texts:
+            joined += "\n\nФрагменты постов:\n" + "\n".join(["— " + x[:200] for x in texts[:REDDIT_SEARCH_LIMIT]])
+        system = (
+            "Ты финтех-ассистент. На основе заголовков и коротких фрагментов "
+            f"про тикер {ticker} дай ОДНО предложение по-русски (≤ {SUMMARY_CHARS} символов): что обсуждают и общий тон."
+            " Без эмодзи, без ссылок, без домыслов. Если данных мало — скажи 'нет свежих сигналов'."
+        )
+        resp = await client.responses.create(
+            model=LLM_MODEL,
+            max_output_tokens=LLM_MAXTOK,
+            temperature=0.3,
+            input=[{"role": "system", "content": system},
+                   {"role": "user", "content": joined}]
+        )
+        text = resp.output_text.strip()
+        return text[:SUMMARY_CHARS] if text else None
+    except Exception:
+        log.exception("LLM summary failed")
+        return None
 
 # ---- Public API ----
 async def collect_signals() -> str:
     """
-    'GME: 5 упоминаний — ключевые темы: ... · тон скорее ... | RBNE: нет свежих сигналов'
-    Ошибки не валят процесс (логи остаются).
+    Пример:
+      'GME: 5 упоминаний — ключевые темы: ... · тон скорее ... | RBNE: нет свежих сигналов'
+    Если есть OPENAI_API_KEY и REDDIT_SUMMARY_LLM!=0 — используем LLM, иначе — локальный разбор.
+    Любые ошибки не валят процесс.
     """
     parts: List[str] = []
     for t in TICKERS:
@@ -213,11 +237,12 @@ async def collect_signals() -> str:
             if not titles:
                 parts.append(f"{t}: нет свежих сигналов")
                 continue
-            if REDDIT_SUMMARY:
-                brief = _make_summary(titles, texts)
-                parts.append(f"{t}: {len(titles)} упоминаний — {brief}")
-            else:
-                parts.append(f"{t}: {len(titles)} упоминаний (напр.: {_short_example(titles)})")
+            brief: Optional[str] = None
+            if USE_LLM:
+                brief = await _llm_summary(t, titles, texts)
+            if not brief:
+                brief = _local_summary(titles, texts)
+            parts.append(f"{t}: {len(titles)} упоминаний — {brief}")
         except Exception:
             log.exception("reddit search failed for %s", t)
             parts.append(f"{t}: нет свежих сигналов")
