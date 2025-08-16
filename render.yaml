@@ -3,8 +3,9 @@ services:
     name: ai-investor-bot
     env: python
     plan: starter
+    autoDeploy: true
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: python -u main.py
     envVars:
       - key: TZ
         value: Europe/Riga
