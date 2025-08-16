@@ -1,0 +1,13 @@
+# Secrets
+FMP_API_KEY
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env.*
+
+# Data
+/data/*
+!/data/.keep
