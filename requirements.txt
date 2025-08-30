@@ -1,4 +1,7 @@
+# requirements.txt
 requests
 openai>=1.0.0
 python-telegram-bot==20.6
-# praw  # если нужен Reddit
+# Если хочешь нативный JobQueue PTB — используй строку ниже вместо предыдущей:
+# python-telegram-bot[job-queue]==20.6
+# praw  # опционально, если нужны Reddit-упоминания
