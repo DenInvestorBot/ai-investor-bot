@@ -29,26 +29,35 @@ except Exception:
     REDDIT_ENABLED = False
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
-HEADERS = {"Accept": "application/json"}
+HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "ai-investor-bot/1.0 (+https://render.com)"
+}
 
 # ---------------------------
-# Простой HTTP с повторами
+# Простой HTTP с ретраями
 # ---------------------------
-def _get(url: str, params: Optional[Dict[str, Any]] = None, retries: int = 3, timeout: int = 10) -> Any:
+def _get(url: str, params: Optional[Dict[str, Any]] = None, retries: int = 4, timeout: int = 15) -> Any:
     last_err = None
-    for attempt in range(retries):
+    backoff = 1.0
+    for _ in range(retries):
         try:
             resp = requests.get(url, headers=HEADERS, params=params or {}, timeout=timeout)
-            if resp.status_code == 429:
-                time.sleep(2 + attempt)
+            if resp.status_code in (429, 502, 503, 504):
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 6.0)
                 continue
             if resp.status_code >= 400:
-                raise RuntimeError(f"{resp.status_code}: {resp.text[:200]}")
-            return resp.json()
+                raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            try:
+                return resp.json()
+            except Exception as je:
+                raise RuntimeError(f"Bad JSON: {je}; body[:200]={resp.text[:200]}")
         except Exception as e:
             last_err = e
-            time.sleep(1 + attempt)
-    raise RuntimeError(f"Ошибка запроса {url}: {last_err}")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 6.0)
+    raise RuntimeError(f"HTTP error for {url} with params={params}: {last_err}")
 
 # ---------------------------
 # Источники данных
@@ -87,7 +96,7 @@ def fetch_reddit_mentions(tickers: List[str], subreddit: str = "CryptoCurrency",
     if not (cid and secret and ua):
         return {}
     reddit = praw.Reddit(client_id=cid, client_secret=secret, user_agent=ua)
-    counts = {t.upper(): 0 for t in tickers}
+    counts = {t.upper(): 0 for t in tickers if t}
     try:
         for sub in reddit.subreddit(subreddit).new(limit=limit):
             text = f"{sub.title} {sub.selftext or ''}".upper()
@@ -198,7 +207,33 @@ def generate_ai_crypto_report(vs_currency: str = "usd", model: str = "gpt-4.1") 
     return f"{title}\n\n{ai_text}"
 
 # ---------------------------
+# Диагностика
+# ---------------------------
+def diagnose_sources() -> str:
+    lines = []
+    try:
+        ping = _get(f"{COINGECKO_BASE}/ping")
+        lines.append(f"CoinGecko ping: {ping.get('gecko_says','ok')}")
+    except Exception as e:
+        lines.append(f"CoinGecko ping ERROR: {e}")
+    try:
+        if _openai_client is None:
+            raise RuntimeError("OPENAI_API_KEY отсутствует/клиент не инициализировался")
+        resp = _openai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": "ok?"}],
+            max_tokens=5,
+            temperature=0
+        )
+        _ = resp.choices[0].message.content
+        lines.append("OpenAI: ok")
+    except Exception as e:
+        lines.append(f"OpenAI ERROR: {e}")
+    return "\n".join(lines)
+
+# ---------------------------
 # Локальный тест
 # ---------------------------
 if __name__ == "__main__":
+    print(diagnose_sources())
     print(generate_ai_crypto_report())
