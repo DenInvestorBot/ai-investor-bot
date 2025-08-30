@@ -1,15 +1,4 @@
-python-telegram-bot==21.6
-APScheduler==3.10.4
-httpx[http2]==0.27.2
-pydantic==2.9.2
-
-# для советника и работы с котировками
-yfinance==0.2.40
-pandas==2.2.2
-numpy==1.26.4
-
-# LLM-саммари
-openai>=1.40.0
-
-# Windows only (локальные тесты)
-tzdata>=2024.1 ; sys_platform == 'win32'
+requests
+openai>=1.0.0
+python-telegram-bot==20.6
+# praw  # если нужен Reddit
