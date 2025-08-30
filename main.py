@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-from ai_crypto_report import generate_ai_crypto_report
+from ai_crypto_report import generate_ai_crypto_report, diagnose_sources
 
 LOCAL_TZ = ZoneInfo("Europe/Riga")
 
@@ -90,6 +90,13 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❗️Ошибка генерации отчёта: {e}")
 
+async def cmd_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        diag = diagnose_sources()
+    except Exception as e:
+        diag = f"Ошибка диагностики: {e}"
+    await update.message.reply_text("🔍 Диагностика:\n" + diag)
+
 # ---------- Ежедневная рассылка ----------
 async def job_daily_report(context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -152,6 +159,7 @@ def main():
     app.add_handler(CommandHandler("env", cmd_env))
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("now", cmd_now))
+    app.add_handler(CommandHandler("diag", cmd_diag))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
