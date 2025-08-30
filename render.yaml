@@ -2,12 +2,22 @@ services:
   - type: worker
     name: ai-investor-bot
     env: python
-    plan: starter
-    autoDeploy: true
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -u main.py
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
     envVars:
-      - key: TZ
-        value: Europe/Riga
-      - key: LOG_LEVEL
-        value: INFO
+      - key: PYTHON_VERSION
+        value: 3.10.13
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      # опционально для Reddit:
+      # - key: REDDIT_CLIENT_ID
+      #   sync: false
+      # - key: REDDIT_CLIENT_SECRET
+      #   sync: false
+      # - key: REDDIT_USER_AGENT
+      #   value: ai-investor-bot/1.0
