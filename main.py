@@ -21,14 +21,18 @@ def mask(s: str, keep: int = 6) -> str:
     return s[:keep] + "..." + "*" * 4
 
 def read_secret_var(*keys: str) -> str:
+    """
+    Берём секрет из ENV или из файла по ключу *_FILE.
+    Например: TELEGRAM_BOT_TOKEN или TELEGRAM_BOT_TOKEN_FILE=/opt/secret/token
+    """
     for key in keys:
         val = os.getenv(key, "")
         if val:
             return val.strip()
-        fp = os.getenv(f"{key}_FILE", "")
-        if fp and os.path.exists(fp):
+        fpath = os.getenv(f"{key}_FILE", "")
+        if fpath and os.path.exists(fpath):
             try:
-                with open(fp, "r", encoding="utf-8") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if content:
                         return content
@@ -86,7 +90,7 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await update.message.reply_text(f"❗️Ошибка генерации отчёта: {e}")
 
-# ---------- Ежедневная рассылка: два варианта ----------
+# ---------- Ежедневная рассылка ----------
 async def job_daily_report(context: ContextTypes.DEFAULT_TYPE):
     try:
         cid_raw = read_chat_id()
@@ -106,8 +110,7 @@ async def daily_loop(app):
         target = now.replace(hour=21, minute=0, second=0, microsecond=0)
         if target <= now:
             target += dt.timedelta(days=1)
-        wait_sec = (target - now).total_seconds()
-        await asyncio.sleep(wait_sec)
+        await asyncio.sleep((target - now).total_seconds())
         try:
             cid_raw = read_chat_id()
             target_chat = int(cid_raw) if cid_raw.lstrip("-").isdigit() else None
@@ -116,24 +119,21 @@ async def daily_loop(app):
             md = generate_ai_crypto_report(vs_currency="usd", model="gpt-4.1")
             await send_markdown(app.bot, target_chat, md)
         except Exception as e:
-            # логируем, но не падаем
             print("daily_loop error:", e)
             await asyncio.sleep(5)
 
+# ---------- Старт ----------
 async def on_startup(app):
     await app.bot.delete_webhook(drop_pending_updates=True)
 
-    # Пытаемся использовать JobQueue, если установлен extra-модуль
     if getattr(app, "job_queue", None) is not None:
         run_time = dt.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
         app.job_queue.run_daily(job_daily_report, time=run_time, name="daily_crypto_report")
-        print("JobQueue: план на 21:00 (Europe/Riga) установлен")
+        print("JobQueue: расписание на 21:00 (Europe/Riga) установлено")
     else:
-        # Fallback на чистый asyncio
         asyncio.create_task(daily_loop(app))
-        print("JobQueue недоступен — запущен fallback-планировщик (asyncio).")
+        print("JobQueue недоступен — запущен fallback-планировщик (asyncio)")
 
-    # Лог конфигурации
     print("=== STARTUP CONFIG ===")
     print("TELEGRAM_BOT_TOKEN =", mask(read_token()))
     print("TELEGRAM_CHAT_ID   =", read_chat_id() or "(empty)")
@@ -150,7 +150,7 @@ def main():
 
     app = ApplicationBuilder().token(token).post_init(on_startup).build()
     app.add_handler(CommandHandler("env", cmd_env))
-    app.add_handler(CommandHandler("ping", cmd_ping"))
+    app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("now", cmd_now))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
