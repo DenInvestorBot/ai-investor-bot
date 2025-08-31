@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import os
+import re
 import asyncio
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+import requests
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -16,6 +18,7 @@ from ipo_monitor import collect_ipos
 from status_check import build_status
 
 LOCAL_TZ = ZoneInfo("Europe/Riga")
+TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{30,}$")  # простой формат-тест
 
 # ---------- Утилиты ----------
 def mask(s: str, keep: int = 6) -> str:
@@ -29,20 +32,38 @@ def read_secret_var(*keys: str) -> str:
     for key in keys:
         val = os.getenv(key, "")
         if val:
-            return val.strip()
+            return val
         fpath = os.getenv(f"{key}_FILE", "")
         if fpath and os.path.exists(fpath):
             try:
                 with open(fpath, "r", encoding="utf-8") as f:
-                    content = f.read().strip()
+                    content = f.read()
                     if content:
                         return content
             except Exception:
                 pass
     return ""
 
+def _clean(s: str) -> str:
+    # убираем кавычки, пробелы и возможные «невидимые» символы (zero-width)
+    return (
+        s.strip()
+         .strip('"').strip("'")
+         .replace("\u200b", "").replace("\u200c", "").replace("\u200d", "")
+         .replace("\u2060", "").replace(" ", "")
+    )
+
 def read_token() -> str:
-    return read_secret_var("TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TOKEN")
+    raw = read_secret_var("TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TOKEN")
+    cleaned = _clean(raw)
+    if not cleaned:
+        print("❌ TELEGRAM_BOT_TOKEN пустой. Проверь переменную окружения на Render.")
+        return ""
+    if ":" not in cleaned:
+        print("❌ В токене нет двоеточия. Формат должен быть: 123456789:AA....")
+    if not TOKEN_RE.match(cleaned):
+        print("⚠️ Токен не проходит формат-проверку (но попробуем префлайт-запрос).")
+    return cleaned
 
 def read_chat_id() -> str:
     return (
@@ -52,7 +73,7 @@ def read_chat_id() -> str:
     ).strip()
 
 def read_openai_key() -> str:
-    return read_secret_var("OPENAI_API_KEY")
+    return _clean(read_secret_var("OPENAI_API_KEY"))
 
 def split_chunks(text: str, limit: int = 3900):
     part, count = [], 0
@@ -187,11 +208,39 @@ async def on_startup(app):
     print("FILES =", os.listdir("."))
     print("======================")
 
-# ---------- Main с автоперезапуском при конфликте ----------
+# ---------- Префлайт-проверка токена ----------
+def _preflight_verify_token(token: str) -> bool:
+    try:
+        url = f"https://api.telegram.org/bot{token}/getMe"
+        r = requests.get(url, timeout=10)
+        print("getMe status:", r.status_code)
+        print("getMe body  :", r.text[:300])
+        if r.ok:
+            js = r.json()
+            if js.get("ok"):
+                user = js.get("result", {}).get("username")
+                print(f"✅ Токен валиден. Бот: @{user}")
+                return True
+        print("❌ Telegram ответил не OK на getMe — токен не принят.")
+        return False
+    except Exception as e:
+        print("❌ Ошибка запроса getMe:", e)
+        return False
+
+# ---------- Main с предв. валидацией и автоповтором при конфликте ----------
 def main():
     token = read_token()
     if not token:
-        print("❌ Не найден TELEGRAM_BOT_TOKEN/BOT_TOKEN/TOKEN (или *_FILE). Проверь ENV на Render.")
+        raise SystemExit(1)
+
+    # Быстрый формат-чек, чтобы увидеть явные проблемы
+    head = token.split(":", 1)[0] if ":" in token else token
+    tail_len = len(token.split(":", 1)[1]) if ":" in token else 0
+    print(f"Token diagnostic: has_colon={':' in token}, head_digits={head.isdigit()}, tail_len={tail_len}")
+
+    # Прямой запрос к Telegram getMe — покажет «Unauthorized» если токен реально непринят
+    if not _preflight_verify_token(token):
+        print("⛔️ Останавливаюсь. Проверь TELEGRAM_BOT_TOKEN (полный, без кавычек/пробелов, не старый после /revoke).")
         raise SystemExit(1)
 
     attempt = 1
@@ -207,7 +256,7 @@ def main():
             app.add_handler(CommandHandler("status", cmd_status))
             app.run_polling(allowed_updates=Update.ALL_TYPES)
             break
-        except Conflict as e:
+        except Conflict:
             print("⚠️ Conflict: другая копия бота ещё активна. Рестарт через 5 сек…")
             import time
             time.sleep(5)
