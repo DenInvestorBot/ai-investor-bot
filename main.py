@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from telegram import Update
 from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.error import Conflict
 
 from ai_crypto_report import generate_ai_crypto_report, diagnose_sources
 from crypto_monitor import collect_new_coins
@@ -186,20 +187,33 @@ async def on_startup(app):
     print("FILES =", os.listdir("."))
     print("======================")
 
+# ---------- Main с автоперезапуском при конфликте ----------
 def main():
     token = read_token()
     if not token:
         print("❌ Не найден TELEGRAM_BOT_TOKEN/BOT_TOKEN/TOKEN (или *_FILE). Проверь ENV на Render.")
         raise SystemExit(1)
 
-    app = ApplicationBuilder().token(token).post_init(on_startup).build()
-    app.add_handler(CommandHandler("env", cmd_env))
-    app.add_handler(CommandHandler("ping", cmd_ping))
-    app.add_handler(CommandHandler("now", cmd_now))
-    app.add_handler(CommandHandler("diag", cmd_diag))
-    app.add_handler(CommandHandler("summary_now", cmd_summary_now))
-    app.add_handler(CommandHandler("status", cmd_status))
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    attempt = 1
+    while True:
+        try:
+            print(f"Launching bot (attempt {attempt})…")
+            app = ApplicationBuilder().token(token).post_init(on_startup).build()
+            app.add_handler(CommandHandler("env", cmd_env))
+            app.add_handler(CommandHandler("ping", cmd_ping))
+            app.add_handler(CommandHandler("now", cmd_now))
+            app.add_handler(CommandHandler("diag", cmd_diag))
+            app.add_handler(CommandHandler("summary_now", cmd_summary_now))
+            app.add_handler(CommandHandler("status", cmd_status))
+            app.run_polling(allowed_updates=Update.ALL_TYPES)
+            break
+        except Conflict as e:
+            print("⚠️ Conflict: другая копия бота ещё активна. Рестарт через 5 сек…")
+            import time
+            time.sleep(5)
+            attempt += 1
+        except KeyboardInterrupt:
+            break
 
 if __name__ == "__main__":
     main()
