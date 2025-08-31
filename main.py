@@ -25,10 +25,6 @@ def mask(s: str, keep: int = 6) -> str:
     return s[:keep] + "..." + "*" * 4
 
 def read_secret_var(*keys: str) -> str:
-    """
-    Берём секрет из ENV или из файла по ключу *_FILE.
-    Например: TELEGRAM_BOT_TOKEN или TELEGRAM_BOT_TOKEN_FILE=/opt/secret/token
-    """
     for key in keys:
         val = os.getenv(key, "")
         if val:
@@ -48,7 +44,6 @@ def read_token() -> str:
     return read_secret_var("TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TOKEN")
 
 def read_chat_id() -> str:
-    # Единый источник chat_id (поддерживаем ADMIN_CHAT_ID и CHAT_ID как фолбэки)
     return (
         os.getenv("TELEGRAM_CHAT_ID")
         or os.getenv("ADMIN_CHAT_ID")
@@ -70,7 +65,6 @@ def split_chunks(text: str, limit: int = 3900):
         yield "".join(part)
 
 async def send_markdown(bot, chat_id: int, text: str):
-    # HTML-режим устойчив к спецсимволам; Markdown-текст просто уйдёт как обычный.
     for chunk in split_chunks(text):
         await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML)
 
@@ -122,7 +116,7 @@ async def build_summary() -> str:
         parts.append("• IPO: " + await collect_ipos())
     except Exception:
         parts.append("• IPO: ошибка")
-    parts.append("")  # пустая строка
+    parts.append("")
     parts.append(generate_ai_crypto_report(vs_currency="usd", model="gpt-4.1"))
     return "\n".join(parts)
 
@@ -154,7 +148,6 @@ async def job_daily_report(context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(target_chat, f"❗️Ошибка генерации сводки: {e}")
 
 async def daily_loop(app):
-    """Fallback-планировщик на asyncio, если JobQueue недоступен."""
     while True:
         now = dt.datetime.now(LOCAL_TZ)
         target = now.replace(hour=21, minute=0, second=0, microsecond=0)
@@ -179,9 +172,8 @@ async def on_startup(app):
     if getattr(app, "job_queue", None) is not None:
         run_time = dt.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
         app.job_queue.run_daily(job_daily_report, time=run_time, name="daily_crypto_report")
-        print("JobQueue: расписание на 21:00 (Europe/Riga) установлено")
-        # сохраним ссылку на планировщик для /status
         app.bot_data["scheduler"] = app.job_queue.scheduler
+        print("JobQueue: расписание на 21:00 (Europe/Riga) установлено")
     else:
         asyncio.create_task(daily_loop(app))
         print("JobQueue недоступен — запущен fallback-планировщик (asyncio)")
