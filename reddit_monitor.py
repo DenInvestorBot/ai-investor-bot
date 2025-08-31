@@ -1,4 +1,3 @@
-# reddit_monitor.py
 import os
 import asyncio
 import logging
@@ -195,12 +194,11 @@ def _local_summary(titles: List[str], texts: List[str]) -> str:
     s = " · ".join(parts) if parts else (titles[0][:79] + "…") if len(titles[0]) > 80 else titles[0]
     return s[:SUMMARY_CHARS]
 
-# ---- LLM summarizer (optional) ----
+# ---- LLM summarizer (unified: chat.completions) ----
 async def _llm_summary(ticker: str, titles: List[str], texts: List[str]) -> Optional[str]:
     try:
         from openai import AsyncOpenAI
         client = AsyncOpenAI()
-        # готовим компактный контент
         joined = "\n".join(["• " + t for t in titles[:REDDIT_SEARCH_LIMIT]])
         if texts:
             joined += "\n\nФрагменты постов:\n" + "\n".join(["— " + x[:200] for x in texts[:REDDIT_SEARCH_LIMIT]])
@@ -209,14 +207,16 @@ async def _llm_summary(ticker: str, titles: List[str], texts: List[str]) -> Opti
             f"про тикер {ticker} дай ОДНО предложение по-русски (≤ {SUMMARY_CHARS} символов): что обсуждают и общий тон."
             " Без эмодзи, без ссылок, без домыслов. Если данных мало — скажи 'нет свежих сигналов'."
         )
-        resp = await client.responses.create(
+        resp = await client.chat.completions.create(
             model=LLM_MODEL,
-            max_output_tokens=LLM_MAXTOK,
             temperature=0.3,
-            input=[{"role": "system", "content": system},
-                   {"role": "user", "content": joined}]
+            max_tokens=LLM_MAXTOK,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": joined},
+            ],
         )
-        text = resp.output_text.strip()
+        text = (resp.choices[0].message.content or "").strip()
         return text[:SUMMARY_CHARS] if text else None
     except Exception:
         log.exception("LLM summary failed")
