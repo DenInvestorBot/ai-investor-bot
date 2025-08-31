@@ -1,7 +1,5 @@
-# requirements.txt
 requests
+httpx
 openai>=1.0.0
-python-telegram-bot==20.6
-# Если хочешь нативный JobQueue PTB — используй строку ниже вместо предыдущей:
-# python-telegram-bot[job-queue]==20.6
-# praw  # опционально, если нужны Reddit-упоминания
+python-telegram-bot[job-queue]==20.6
+# praw  # опционально, если нужны reddit-упоминания в ai_crypto_report
