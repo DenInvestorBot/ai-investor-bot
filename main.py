@@ -1,4 +1,3 @@
-# main.py
 # -*- coding: utf-8 -*-
 import os
 import asyncio
@@ -6,9 +5,14 @@ import datetime as dt
 from zoneinfo import ZoneInfo
 
 from telegram import Update
+from telegram.constants import ParseMode
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from ai_crypto_report import generate_ai_crypto_report, diagnose_sources
+from crypto_monitor import collect_new_coins
+from reddit_monitor import collect_signals
+from ipo_monitor import collect_ipos
+from status_check import build_status
 
 LOCAL_TZ = ZoneInfo("Europe/Riga")
 
@@ -44,7 +48,12 @@ def read_token() -> str:
     return read_secret_var("TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TOKEN")
 
 def read_chat_id() -> str:
-    return os.getenv("TELEGRAM_CHAT_ID", os.getenv("CHAT_ID", "")).strip()
+    # Единый источник chat_id (поддерживаем ADMIN_CHAT_ID и CHAT_ID как фолбэки)
+    return (
+        os.getenv("TELEGRAM_CHAT_ID")
+        or os.getenv("ADMIN_CHAT_ID")
+        or os.getenv("CHAT_ID", "")
+    ).strip()
 
 def read_openai_key() -> str:
     return read_secret_var("OPENAI_API_KEY")
@@ -61,8 +70,9 @@ def split_chunks(text: str, limit: int = 3900):
         yield "".join(part)
 
 async def send_markdown(bot, chat_id: int, text: str):
+    # HTML-режим устойчив к спецсимволам; Markdown-текст просто уйдёт как обычный.
     for chunk in split_chunks(text):
-        await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="Markdown")
+        await bot.send_message(chat_id=chat_id, text=chunk, parse_mode=ParseMode.HTML)
 
 # ---------- Команды ----------
 async def cmd_env(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,6 +107,39 @@ async def cmd_diag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         diag = f"Ошибка диагностики: {e}"
     await update.message.reply_text("🔍 Диагностика:\n" + diag)
 
+# ---------- Краткая сводка + AI-отчёт ----------
+async def build_summary() -> str:
+    parts = ["<b>📊 Краткая сводка</b>"]
+    try:
+        parts.append("• Тренды: " + await collect_new_coins())
+    except Exception:
+        parts.append("• Тренды: ошибка")
+    try:
+        parts.append("• Reddit: " + await collect_signals())
+    except Exception:
+        parts.append("• Reddit: ошибка")
+    try:
+        parts.append("• IPO: " + await collect_ipos())
+    except Exception:
+        parts.append("• IPO: ошибка")
+    parts.append("")  # пустая строка
+    parts.append(generate_ai_crypto_report(vs_currency="usd", model="gpt-4.1"))
+    return "\n".join(parts)
+
+async def cmd_summary_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        txt = await build_summary()
+        await send_markdown(context.bot, update.effective_chat.id, txt)
+    except Exception as e:
+        await update.message.reply_text(f"❗️Ошибка сводки: {e}")
+
+async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        text = await build_status(context)
+    except Exception as e:
+        text = f"Ошибка статуса: {e}"
+    await update.message.reply_text(text)
+
 # ---------- Ежедневная рассылка ----------
 async def job_daily_report(context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -104,11 +147,11 @@ async def job_daily_report(context: ContextTypes.DEFAULT_TYPE):
         target_chat = int(cid_raw) if cid_raw.lstrip("-").isdigit() else None
         if not target_chat:
             return
-        md = generate_ai_crypto_report(vs_currency="usd", model="gpt-4.1")
-        await send_markdown(context.bot, target_chat, md)
+        txt = await build_summary()
+        await send_markdown(context.bot, target_chat, txt)
     except Exception as e:
-        if target_chat:
-            await context.bot.send_message(target_chat, f"❗️Ошибка генерации отчёта: {e}")
+        if 'target_chat' in locals() and target_chat:
+            await context.bot.send_message(target_chat, f"❗️Ошибка генерации сводки: {e}")
 
 async def daily_loop(app):
     """Fallback-планировщик на asyncio, если JobQueue недоступен."""
@@ -123,8 +166,8 @@ async def daily_loop(app):
             target_chat = int(cid_raw) if cid_raw.lstrip("-").isdigit() else None
             if not target_chat:
                 continue
-            md = generate_ai_crypto_report(vs_currency="usd", model="gpt-4.1")
-            await send_markdown(app.bot, target_chat, md)
+            txt = await build_summary()
+            await send_markdown(app.bot, target_chat, txt)
         except Exception as e:
             print("daily_loop error:", e)
             await asyncio.sleep(5)
@@ -137,6 +180,8 @@ async def on_startup(app):
         run_time = dt.time(hour=21, minute=0, tzinfo=LOCAL_TZ)
         app.job_queue.run_daily(job_daily_report, time=run_time, name="daily_crypto_report")
         print("JobQueue: расписание на 21:00 (Europe/Riga) установлено")
+        # сохраним ссылку на планировщик для /status
+        app.bot_data["scheduler"] = app.job_queue.scheduler
     else:
         asyncio.create_task(daily_loop(app))
         print("JobQueue недоступен — запущен fallback-планировщик (asyncio)")
@@ -160,6 +205,8 @@ def main():
     app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("now", cmd_now))
     app.add_handler(CommandHandler("diag", cmd_diag))
+    app.add_handler(CommandHandler("summary_now", cmd_summary_now))
+    app.add_handler(CommandHandler("status", cmd_status))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
