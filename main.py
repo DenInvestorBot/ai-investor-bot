@@ -1,8 +1,10 @@
 import os
+import time
 import logging
 import importlib
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram.ext import Updater, CommandHandler
+from telegram.error import Conflict
 
 from screener_config import ScreenerConfig
 from screener import run_screener
@@ -50,7 +52,7 @@ def _resolve_runner(module_name, preferred=("run", "main", "run_*", "monitor", "
     return _runner
 
 
-# ---- Telegram команды ----
+# --- Telegram команды ---
 def cmd_start(update, context):
     update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
 
@@ -72,9 +74,6 @@ def cmd_runall(update, context):
     except Exception as e:
         logging.exception("runall error")
         update.message.reply_text(f"Ошибка runall: {e}")
-
-def on_error(update, context):
-    logger.exception("Telegram handler error: %s", context.error)
 
 
 def _setup_scheduler():
@@ -123,25 +122,35 @@ def main():
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("status", cmd_status))
     dp.add_handler(CommandHandler("runall", cmd_runall))
-    dp.add_error_handler(on_error)
 
     _setup_scheduler()
 
-    # ---- WEBHOOK ONLY (никакого polling → нет конфликта) ----
-    public_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
-    if not public_url:
-        public_url = os.getenv("WEBHOOK_URL", "").rstrip("/")
-    if not public_url:
-        raise ValueError("WEBHOOK URL не задан (ни RENDER_EXTERNAL_URL, ни WEBHOOK_URL). Укажи один из них.")
-
-    port = int(os.getenv("PORT", "10000"))  # Render задаёт PORT автоматически
-    listen_addr = "0.0.0.0"
-    url_path = token  # безопасный уникальный путь
-
-    logger.info("Starting webhook on %s:%s with URL %s/%s", listen_addr, port, public_url, url_path)
-    updater.start_webhook(listen=listen_addr, port=port, url_path=url_path)
-    updater.bot.setWebhook(f"{public_url}/{url_path}")
-    updater.idle()
+    # --- webhook если есть URL, иначе polling ---
+    public_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/") or os.getenv("WEBHOOK_URL", "").rstrip("/")
+    if public_url:
+        port = int(os.getenv("PORT", "10000"))
+        listen_addr = "0.0.0.0"
+        url_path = token  # уникальный путь
+        logger.info("Starting webhook on %s:%s with URL %s/%s", listen_addr, port, public_url, url_path)
+        updater.start_webhook(listen=listen_addr, port=port, url_path=url_path)
+        updater.bot.setWebhook(f"{public_url}/{url_path}")
+        updater.idle()
+    else:
+        try:
+            updater.bot.delete_webhook()
+        except Exception:
+            pass
+        logger.info("Starting long polling...")
+        try:
+            updater.start_polling(clean=True, timeout=30, read_latency=10.0)
+            updater.idle()
+        except Conflict as e:
+            logger.error("Polling conflict: %s", e)
+            logger.error("С тем же токеном работает второй экземпляр. "
+                         "Решения: задать WEBHOOK_URL / RENDER_EXTERNAL_URL или перевыпустить токен у @BotFather.")
+            # Деградация: оставляем планировщик жить, без чтения апдейтов
+            while True:
+                time.sleep(60)
 
 
 if __name__ == "__main__":
