@@ -4,7 +4,8 @@ import importlib
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram.ext import Updater, CommandHandler
 
-# никаких импортов crypto_monitor тут быть не должно!
+from screener_config import ScreenerConfig
+from screener import run_screener
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -12,7 +13,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ai-investor-bot")
 
-def _resolve_runner(module_name, preferred=("run_crypto_monitor", "run", "main", "collect_new_coins", "monitor", "check")):
+# --- утилиты ---
+def _get_env_any(names):
+    for n in names:
+        v = os.environ.get(n)
+        if v:
+            if n != "TELEGRAM_BOT_TOKEN":
+                logger.info("Использую токен из ENV '%s'", n)
+            return v
+    return None
+
+def _resolve_runner(module_name, preferred=("run_crypto_monitor","run","main","collect_new_coins","monitor","check")):
     try:
         m = importlib.import_module(module_name)
     except Exception as e:
@@ -21,22 +32,28 @@ def _resolve_runner(module_name, preferred=("run_crypto_monitor", "run", "main",
             logger.error("%s: модуль не импортирован (%s)", module_name, e)
         return _stub
     for name in preferred:
-        if hasattr(m, name) and callable(getattr(m, name)):
-            return getattr(m, name)
+        fn = getattr(m, name, None)
+        if callable(fn):
+            return fn
     def _runner():
         logger.warning("%s: не найдено ожидаемых функций (%s) — пропускаю тик.", module_name, ", ".join(preferred))
     return _runner
 
+# --- команды TG ---
 def cmd_start(update, context):
     update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
 
 def cmd_status(update, context):
     update.message.reply_text("✅ Бот работает. Мониторы: crypto, ipo, reddit, screener.")
 
+# --- точка входа ---
 def main():
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    # Поддерживаем разные имена переменных
+    token = _get_env_any(["TELEGRAM_BOT_TOKEN","BOT_TOKEN","TG_BOT_TOKEN"])
     if not token:
-        raise ValueError("Не найден TELEGRAM_BOT_TOKEN в переменных окружения")
+        logger.error("Не найден токен в ENV (искал: TELEGRAM_BOT_TOKEN, BOT_TOKEN, TG_BOT_TOKEN). "
+                     "Проверь настройки Render → Environment.")
+        raise ValueError("Отсутствует токен Telegram")
 
     updater = Updater(token, use_context=True)
     dp = updater.dispatcher
@@ -45,19 +62,16 @@ def main():
 
     scheduler = BackgroundScheduler(timezone="Europe/Riga")
 
-    # 🔧 Больше никаких 'from crypto_monitor import run_crypto_monitor'
-    run_crypto_monitor = _resolve_runner("crypto_monitor", preferred=("run_crypto_monitor", "run", "main", "collect_new_coins"))
+    run_crypto_monitor = _resolve_runner("crypto_monitor",
+                                         preferred=("run_crypto_monitor","run","main","collect_new_coins"))
     scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
 
-    run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor", "run", "main"))
+    run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor","run","main"))
     scheduler.add_job(run_ipo_monitor, "interval", hours=6, id="ipo_monitor")
 
-    run_reddit_monitor = _resolve_runner("reddit_monitor", preferred=("run_reddit_monitor", "run", "main"))
+    run_reddit_monitor = _resolve_runner("reddit_monitor", preferred=("run_reddit_monitor","run","main"))
     scheduler.add_job(run_reddit_monitor, "interval", hours=1, id="reddit_monitor")
 
-    # Скринер дешёвых x-охотников
-    from screener_config import ScreenerConfig
-    from screener import run_screener
     cfg = ScreenerConfig()
     scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15", id="cheap_x_screener")
 
