@@ -1,26 +1,11 @@
 import os
 import logging
+import importlib
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram.ext import Updater, CommandHandler
 
-# ---- Импорты наших задач
-from crypto_monitor import run_crypto_monitor
 from screener_config import ScreenerConfig
 from screener import run_screener
-
-# Заглушки (безопасные) — можно удалить, если у тебя есть боевые версии
-try:
-    from ipo_monitor import run_ipo_monitor
-except Exception:  # noqa
-    def run_ipo_monitor():
-        logging.getLogger(__name__).info("IPO monitor: заглушка — задача пропущена")
-
-try:
-    from reddit_monitor import run_reddit_monitor
-except Exception:  # noqa
-    def run_reddit_monitor():
-        logging.getLogger(__name__).info("Reddit monitor: заглушка — задача пропущена")
-
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -29,13 +14,46 @@ logging.basicConfig(
 logger = logging.getLogger("ai-investor-bot")
 
 
+# ---------- Устойчивое разрешение функций из модулей ----------
+
+def _resolve_runner(module_name, preferred=("run_crypto_monitor", "run", "main", "check", "monitor")):
+    """
+    Пытаемся импортировать модуль и взять одну из функций:
+    - сперва exact: run_crypto_monitor  (или другое имя для соответствующего модуля)
+    - затем fallback: run / main / check / monitor
+    Если ни одной нет — вернём раннер, который просто логирует пропуск.
+    """
+    try:
+        m = importlib.import_module(module_name)
+    except Exception as e:
+        logger.exception("Не удалось импортировать модуль %s", module_name)
+        def _stub():
+            logger.error("%s: модуль не импортирован (%s)", module_name, e)
+        return _stub
+
+    # Выберем первую доступную функцию
+    for name in preferred:
+        if hasattr(m, name):
+            func = getattr(m, name)
+            if callable(func):
+                return func
+
+    # Попробуем запустить модуль как скрипт, если функций нет
+    def _runner():
+        logger.warning("%s: не найдено ожидаемых функций (%s) — пропускаю тик.", module_name, ", ".join(preferred))
+    return _runner
+
+
+# ---------- Команды Telegram ----------
+
 def cmd_start(update, context):
     update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
 
-
 def cmd_status(update, context):
-    update.message.reply_text("✅ Бот работает. Мониторы запущены: crypto, ipo, reddit, screener.")
+    update.message.reply_text("✅ Бот работает. Мониторы: crypto, ipo, reddit, screener.")
 
+
+# ---------- Точка входа ----------
 
 def main():
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -51,13 +69,19 @@ def main():
     # Планировщик задач
     scheduler = BackgroundScheduler(timezone="Europe/Riga")
 
-    # 1) Трендовые монеты CoinGecko (краткая сводка)
+    # 1) Crypto monitor — устойчивое разрешение названия функции
+    run_crypto_monitor = _resolve_runner(
+        "crypto_monitor",
+        preferred=("run_crypto_monitor", "run", "main", "collect_new_coins")  # твои вероятные имена
+    )
     scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
 
-    # 2) IPO мониторинг (заглушка, можно заменить своим модулем)
+    # 2) IPO monitor (если нет функции — тик пропустится без падения)
+    run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor", "run", "main"))
     scheduler.add_job(run_ipo_monitor, "interval", hours=6, id="ipo_monitor")
 
-    # 3) Reddit мониторинг (заглушка, можно заменить своим модулем)
+    # 3) Reddit monitor
+    run_reddit_monitor = _resolve_runner("reddit_monitor", preferred=("run_reddit_monitor", "run", "main"))
     scheduler.add_job(run_reddit_monitor, "interval", hours=1, id="reddit_monitor")
 
     # 4) Скринер «дешёвых x-охотников»
