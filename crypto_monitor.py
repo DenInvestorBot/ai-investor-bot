@@ -5,13 +5,17 @@ import logging
 import random
 from typing import List, Dict, Any
 
-import httpx
+import httpx  # не забудь добавить httpx в requirements.txt
 
 log = logging.getLogger(__name__)
 
 COINGECKO = os.getenv("COINGECKO_BASE", "https://api.coingecko.com/api/v3")
 UA = {"User-Agent": "ai-investor-bot/1.0 (+bot summary)"}
 COINS_LIMIT = int(os.getenv("CRYPTO_TREND_LIMIT", "7"))  # Сколько монет показать в краткой сводке
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+CRYPTO_TREND_ALERTS = os.getenv("CRYPTO_TREND_ALERTS", "1") not in ("0", "false", "False")
 
 
 async def _get_json(url: str, *, retries: int = 4) -> Dict[str, Any]:
@@ -59,7 +63,7 @@ async def _get_json(url: str, *, retries: int = 4) -> Dict[str, Any]:
                 continue
             log.exception("CoinGecko request failed (final)")
             raise
-    return {}  # не должно дойти, но для типизации
+    return {}  # для типизации
 
 
 def _format_trending(coins: List[Dict[str, Any]]) -> str:
@@ -95,3 +99,47 @@ async def collect_new_coins() -> str:
     except Exception:
         log.exception("collect_new_coins failed")
         return "ошибка"
+
+
+async def _send_telegram_async(text: str) -> None:
+    """Отправка сообщения в Telegram Bot API (асинхронно, без зависимостей от python-telegram-bot)."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        log.info("TELEGRAM_BOT_TOKEN/CHAT_ID не заданы — пропускаю отправку")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(url, json=payload)
+            r.raise_for_status()
+    except Exception:
+        log.exception("Не удалось отправить сообщение в Telegram")
+
+
+def run_crypto_monitor() -> None:
+    """
+    Синхронная обёртка для планировщика.
+    1) Получает трендовые монеты с CoinGecko.
+    2) Логирует.
+    3) По желанию отправляет краткую сводку в Telegram.
+    """
+    async def _runner():
+        summary = await collect_new_coins()
+        msg = f"🟢 Трендовые монеты CoinGecko: {summary}"
+        log.info(msg)
+        if CRYPTO_TREND_ALERTS:
+            await _send_telegram_async(msg)
+
+    # безопасный запуск event loop в синхронном контексте
+    try:
+        asyncio.run(_runner())
+    except RuntimeError:
+        # если уже есть активный цикл (например, внутри другого async-кода)
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(_runner())
+
+
+if __name__ == "__main__":
+    # Локальный тест:
+    logging.basicConfig(level=logging.INFO)
+    run_crypto_monitor()
