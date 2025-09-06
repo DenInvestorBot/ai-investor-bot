@@ -1,4 +1,3 @@
-# reddit_monitor.py — requests-only, без PRAW
 import os
 import logging
 from collections import Counter
@@ -12,12 +11,8 @@ TICKERS = [t.strip().upper() for t in os.getenv("TICKERS", "GME,RBNE,BTC,ETH,NVD
 LIMIT = int(os.getenv("REDDIT_LIMIT", "50"))
 
 def _send_telegram(text: str) -> None:
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or
-             os.getenv("BOT_TOKEN") or
-             os.getenv("TG_BOT_TOKEN"))
-    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or
-               os.getenv("CHAT_ID") or
-               os.getenv("TG_CHAT_ID"))
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or os.getenv("TG_BOT_TOKEN"))
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or os.getenv("TG_CHAT_ID"))
     if not (token and chat_id):
         log.info("Reddit: TG token/chat_id не заданы — пропускаю отправку")
         return
@@ -35,8 +30,7 @@ def _fetch_subreddit_json(sub: str) -> List[Dict[str, Any]]:
         r = requests.get(url, headers={"User-Agent": "ai-investor-bot/reddit/1.0"}, timeout=20)
         r.raise_for_status()
         data = r.json()
-        posts = data.get("data", {}).get("children", [])
-        return posts
+        return data.get("data", {}).get("children", [])
     except requests.RequestException:
         log.exception("Reddit fetch failed for /r/%s", sub)
         return []
@@ -49,13 +43,11 @@ def _count_tickers_in_posts(posts: List[Dict[str, Any]]) -> Counter:
         selftext = (d.get("selftext") or "").upper()
         text = f"{title} {selftext}"
         for t in TICKERS:
-            # простая эвристика: точное совпадение по слову или с $TICKER
             if f"${t}" in text or f" {t} " in f" {text} ":
                 cnt[t] += 1
     return cnt
 
 def run_reddit_monitor():
-    """Считает упоминания тикеров в свежих постах популярных сабов и шлёт топ."""
     total = Counter()
     for sub in SUBREDDITS:
         posts = _fetch_subreddit_json(sub.strip())
@@ -71,8 +63,7 @@ def run_reddit_monitor():
     log.info(text.replace("\n", " | "))
     _send_telegram(text)
 
-# Совместимость с авто-детектом
-def run():
+def run():  # совместимость
     run_reddit_monitor()
 
 def main():
