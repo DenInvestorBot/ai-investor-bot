@@ -1,5 +1,4 @@
-requests
-httpx
-openai>=1.0.0
-python-telegram-bot[job-queue]==20.6
-# praw  # опционально, если нужны reddit-упоминания в ai_crypto_report
+python-telegram-bot==13.15
+apscheduler>=3.10.4
+requests>=2.31.0
+praw>=7.7.1
