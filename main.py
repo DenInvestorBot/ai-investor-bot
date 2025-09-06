@@ -4,8 +4,7 @@ import importlib
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram.ext import Updater, CommandHandler
 
-from screener_config import ScreenerConfig
-from screener import run_screener
+# никаких импортов crypto_monitor тут быть не должно!
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -46,9 +45,8 @@ def main():
 
     scheduler = BackgroundScheduler(timezone="Europe/Riga")
 
-    # 🔧 Больше никаких from crypto_monitor import run_crypto_monitor
-    run_crypto_monitor = _resolve_runner("crypto_monitor",
-                                         preferred=("run_crypto_monitor", "run", "main", "collect_new_coins"))
+    # 🔧 Больше никаких 'from crypto_monitor import run_crypto_monitor'
+    run_crypto_monitor = _resolve_runner("crypto_monitor", preferred=("run_crypto_monitor", "run", "main", "collect_new_coins"))
     scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
 
     run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor", "run", "main"))
@@ -57,6 +55,9 @@ def main():
     run_reddit_monitor = _resolve_runner("reddit_monitor", preferred=("run_reddit_monitor", "run", "main"))
     scheduler.add_job(run_reddit_monitor, "interval", hours=1, id="reddit_monitor")
 
+    # Скринер дешёвых x-охотников
+    from screener_config import ScreenerConfig
+    from screener import run_screener
     cfg = ScreenerConfig()
     scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15", id="cheap_x_screener")
 
