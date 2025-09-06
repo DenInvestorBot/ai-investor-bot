@@ -63,7 +63,7 @@ def run_reddit_monitor():
     log.info(text.replace("\n", " | "))
     _send_telegram(text)
 
-def run():  # совместимость
+def run():
     run_reddit_monitor()
 
 def main():
