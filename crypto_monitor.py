@@ -91,7 +91,6 @@ def run_crypto_monitor() -> None:
     if CRYPTO_TREND_ALERTS:
         _send_telegram(msg)
 
-# Страховка: всегда экспортируем функцию
 try:
     run_crypto_monitor
 except NameError:
