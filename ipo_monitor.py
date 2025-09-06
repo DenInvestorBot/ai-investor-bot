@@ -1,120 +1,92 @@
-# ipo_monitor.py
+# ipo_monitor.py — requests-only
 import os
-import asyncio
 import logging
+import time
 import random
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
-from zoneinfo import ZoneInfo
-
-import httpx
+from typing import List, Dict, Any
+import requests
 
 log = logging.getLogger(__name__)
 
-TZ = ZoneInfo(os.getenv("TZ", "Europe/Riga"))
-IPO_LOOKAHEAD_DAYS = int(os.getenv("IPO_LOOKAHEAD_DAYS", "14"))
-IPO_LIMIT = int(os.getenv("IPO_LIMIT", "5"))
-PROVIDER = os.getenv("IPO_PROVIDER", "").lower().strip()
-FMP_KEY = os.getenv("FMP_API_KEY") or os.getenv("IPO_API_KEY")
-FINNHUB_KEY = os.getenv("FINNHUB_API_KEY")
+# Можно указать свой JSON-эндпоинт с IPO (или прокси сервер), например:
+# {"items":[{"symbol":"ABC","company":"Acme Corp","date":"2025-09-10","price":"$12-14"}]}
+IPO_FEED_URL = os.getenv("IPO_FEED_URL", "").strip()
 
-UA = {"User-Agent": "ai-investor-bot/1.0 (+ipo monitor)"}
-TIMEOUT = httpx.Timeout(25.0)
+def _send_telegram(text: str) -> None:
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or
+             os.getenv("BOT_TOKEN") or
+             os.getenv("TG_BOT_TOKEN"))
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or
+               os.getenv("CHAT_ID") or
+               os.getenv("TG_CHAT_ID"))
+    if not (token and chat_id):
+        log.info("IPO: TG token/chat_id не заданы — пропускаю отправку")
+        return
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                          json={"chat_id": chat_id, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+                          timeout=15)
+        r.raise_for_status()
+    except requests.RequestException:
+        log.exception("IPO: не удалось отправить сообщение в Telegram")
 
-def _date_range() -> (str, str):
-    now = datetime.now(tz=TZ).date()
-    return now.isoformat(), (now + timedelta(days=IPO_LOOKAHEAD_DAYS)).isoformat()
-
-async def _get_json(url: str, *, headers: Optional[Dict[str, str]] = None, retries: int = 4) -> Dict[str, Any]:
+def _get_json(url: str, retries: int = 3, timeout: int = 20) -> Dict[str, Any]:
     delay = 1.0
-    headers = {**UA, **(headers or {})}
-    for attempt in range(1, retries + 1):
+    for attempt in range(1, retries+1):
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT, headers=headers, http2=True) as client:
-                r = await client.get(url)
-                if r.status_code == 429:
-                    ra = r.headers.get("Retry-After")
-                    try:
-                        wait_s = float(ra) if ra else delay + random.random()
-                    except ValueError:
-                        wait_s = delay + random.random()
-                    log.warning("IPO 429: retry in %.1fs (attempt %d/%d)", wait_s, attempt, retries)
-                    await asyncio.sleep(wait_s)
-                    delay *= 2
-                    continue
-                r.raise_for_status()
-                return r.json()
-        except Exception:
+            r = requests.get(url, headers={"User-Agent": "ai-investor-bot/ipo/1.0"}, timeout=timeout)
+            if r.status_code == 429 and attempt < retries:
+                wait = float(r.headers.get("Retry-After") or delay + random.random())
+                log.warning("IPO feed 429. Retry in %.1fs", wait); time.sleep(wait); delay *= 2; continue
+            if 500 <= r.status_code < 600 and attempt < retries:
+                wait = delay + random.random()
+                log.warning("IPO feed %s. Retry in %.1fs", r.status_code, wait); time.sleep(wait); delay *= 2; continue
+            r.raise_for_status()
+            return r.json()
+        except requests.RequestException:
             if attempt < retries:
-                wait_s = delay + random.random()
-                log.warning("IPO request failed. Retry in %.1fs (attempt %d/%d)", wait_s, attempt, retries)
-                await asyncio.sleep(wait_s)
-                delay *= 2
-                continue
-            log.exception("IPO request failed (final)")
-            break
+                wait = delay + random.random()
+                log.warning("IPO feed request failed. Retry in %.1fs", wait); time.sleep(wait); delay *= 2; continue
+            log.exception("IPO feed request failed (final)")
+            return {}
     return {}
 
-async def _fetch_fmp(fr: str, to: str) -> List[Dict[str, Any]]:
-    if not FMP_KEY:
-        return []
-    data = await _get_json(f"https://financialmodelingprep.com/api/v3/ipo_calendar?from={fr}&to={to}&apikey={FMP_KEY}")
-    if isinstance(data, dict):
-        data = data.get("ipoCalendar") or data.get("data") or []
-    return data or []
+def _format_items(items: List[Dict[str, Any]]) -> str:
+    lines = []
+    for it in items[:10]:
+        sym = it.get("symbol") or "?"
+        name = it.get("company") or it.get("name") or "Company"
+        date = it.get("date") or it.get("pricingDate") or "?"
+        price = it.get("price") or it.get("priceRange") or ""
+        line = f"• <b>{sym}</b> — {name} | {date}"
+        if price:
+            line += f" | {price}"
+        lines.append(line)
+    return "\n".join(lines) if lines else "пусто"
 
-async def _fetch_finnhub(fr: str, to: str) -> List[Dict[str, Any]]:
-    if not FINNHUB_KEY:
-        return []
-    data = await _get_json(f"https://finnhub.io/api/v1/calendar/ipo?from={fr}&to={to}&token={FINNHUB_KEY}")
-    return data.get("ipoCalendar", []) if isinstance(data, dict) else []
+def run_ipo_monitor():
+    """Тянет список IPO из произвольного JSON-фида (если задан), логирует и шлёт краткую сводку."""
+    if not IPO_FEED_URL:
+        log.info("IPO: не задан IPO_FEED_URL — задача пропущена (ok)")
+        return
 
-def _fmt_item(d: Dict[str, Any]) -> str:
-    date = d.get("date") or d.get("priced")
-    try:
-        if isinstance(date, (int, float)):
-            date = datetime.fromtimestamp(date, tz=TZ).date().isoformat()
-    except Exception:
-        pass
-    date = str(date) if date else "?"
-    symbol = d.get("symbol") or d.get("ticker") or "?"
-    name = d.get("company") or d.get("companyName") or d.get("name") or "?"
-    price = d.get("priceRange") or d.get("price") or None
-    if not price and d.get("priceLow") and d.get("priceHigh"):
-        price = f"${d.get('priceLow')}–${d.get('priceHigh')}"
-    if isinstance(price, str) and price and not price.startswith("$"):
-        price = f"${price}"
-    return f"{date} {symbol} {name} ({price})" if price else f"{date} {symbol} {name}"
+    data = _get_json(IPO_FEED_URL)
+    items = data.get("items") or data.get("ipos") or data.get("results") or []
+    if not isinstance(items, list):
+        log.warning("IPO: неожиданный формат ответа (нет списка items)")
+        return
 
-def _format_list(items: List[Dict[str, Any]]) -> str:
-    if not items:
-        return "нет новых IPO"
-    try:
-        items = sorted(items, key=lambda d: datetime.fromisoformat(str(d.get("date"))))
-    except Exception:
-        pass
-    top = items[:IPO_LIMIT]
-    rest = max(0, len(items) - len(top))
-    s = " | ".join(_fmt_item(x) for x in top)
-    if rest:
-        s += f" | +{rest} ещё"
-    return s
+    text = "🗓️ Предстоящие/свежие IPO:\n" + _format_items(items)
+    log.info(text.replace("\n", " | "))
+    _send_telegram(text)
 
-async def collect_ipos() -> str:
-    """Любые сбои → 'нет новых IPO' (причина в логах)"""
-    try:
-        fr, to = _date_range()
-        items: List[Dict[str, Any]] = []
-        if PROVIDER == "fmp" and FMP_KEY:
-            items = await _fetch_fmp(fr, to)
-        elif PROVIDER == "finnhub" and FINNHUB_KEY:
-            items = await _fetch_finnhub(fr, to)
-        else:
-            if FMP_KEY:
-                items = await _fetch_fmp(fr, to)
-            elif FINNHUB_KEY:
-                items = await _fetch_finnhub(fr, to)
-        return _format_list(items)
-    except Exception:
-        log.exception("collect_ipos failed")
-        return "нет новых IPO"
+# Совместимость с авто-детектом
+def run():
+    run_ipo_monitor()
+
+def main():
+    run_ipo_monitor()
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    run_ipo_monitor()
