@@ -68,7 +68,7 @@ def run_ipo_monitor():
     log.info(text.replace("\n", " | "))
     _send_telegram(text)
 
-def run():  # совместимость
+def run():
     run_ipo_monitor()
 
 def main():
