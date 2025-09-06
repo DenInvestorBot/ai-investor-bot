@@ -1,4 +1,3 @@
-# ipo_monitor.py — requests-only
 import os
 import logging
 import time
@@ -7,18 +6,11 @@ from typing import List, Dict, Any
 import requests
 
 log = logging.getLogger(__name__)
-
-# Можно указать свой JSON-эндпоинт с IPO (или прокси сервер), например:
-# {"items":[{"symbol":"ABC","company":"Acme Corp","date":"2025-09-10","price":"$12-14"}]}
 IPO_FEED_URL = os.getenv("IPO_FEED_URL", "").strip()
 
 def _send_telegram(text: str) -> None:
-    token = (os.getenv("TELEGRAM_BOT_TOKEN") or
-             os.getenv("BOT_TOKEN") or
-             os.getenv("TG_BOT_TOKEN"))
-    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or
-               os.getenv("CHAT_ID") or
-               os.getenv("TG_CHAT_ID"))
+    token = (os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("BOT_TOKEN") or os.getenv("TG_BOT_TOKEN"))
+    chat_id = (os.getenv("TELEGRAM_CHAT_ID") or os.getenv("CHAT_ID") or os.getenv("TG_CHAT_ID"))
     if not (token and chat_id):
         log.info("IPO: TG token/chat_id не заданы — пропускаю отправку")
         return
@@ -59,29 +51,24 @@ def _format_items(items: List[Dict[str, Any]]) -> str:
         date = it.get("date") or it.get("pricingDate") or "?"
         price = it.get("price") or it.get("priceRange") or ""
         line = f"• <b>{sym}</b> — {name} | {date}"
-        if price:
-            line += f" | {price}"
+        if price: line += f" | {price}"
         lines.append(line)
     return "\n".join(lines) if lines else "пусто"
 
 def run_ipo_monitor():
-    """Тянет список IPO из произвольного JSON-фида (если задан), логирует и шлёт краткую сводку."""
     if not IPO_FEED_URL:
         log.info("IPO: не задан IPO_FEED_URL — задача пропущена (ok)")
         return
-
     data = _get_json(IPO_FEED_URL)
     items = data.get("items") or data.get("ipos") or data.get("results") or []
     if not isinstance(items, list):
         log.warning("IPO: неожиданный формат ответа (нет списка items)")
         return
-
     text = "🗓️ Предстоящие/свежие IPO:\n" + _format_items(items)
     log.info(text.replace("\n", " | "))
     _send_telegram(text)
 
-# Совместимость с авто-детектом
-def run():
+def run():  # совместимость
     run_ipo_monitor()
 
 def main():
