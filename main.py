@@ -1,43 +1,118 @@
-==> Running 'python main.py'
-INFO:ai-investor-bot:Использую токен из ENV 'BOT_TOKEN'
-INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
-ERROR:ai-investor-bot:Не удалось импортировать модуль ipo_monitor
-Traceback (most recent call last):
-  File "/opt/render/project/src/main.py", line 28, in _resolve_runner
-    m = importlib.import_module(module_name)
-  File "/opt/render/project/python/Python-3.10.13/lib/python3.10/importlib/__init__.py", line 126, in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
-  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
-  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
-  File "/opt/render/project/src/ipo_monitor.py", line 10, in <module>
-    import httpx
-ModuleNotFoundError: No module named 'httpx'
-INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
-ERROR:ai-investor-bot:Не удалось импортировать модуль reddit_monitor
-Traceback (most recent call last):
-  File "/opt/render/project/src/main.py", line 28, in _resolve_runner
-    m = importlib.import_module(module_name)
-  File "/opt/render/project/python/Python-3.10.13/lib/python3.10/importlib/__init__.py", line 126, in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
-  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
-  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
-  File "/opt/render/project/src/reddit_monitor.py", line 10, in <module>
-    import httpx
-ModuleNotFoundError: No module named 'httpx'
-INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
-INFO:apscheduler.scheduler:Adding job tentatively -- it will be properly scheduled when the scheduler starts
-INFO:apscheduler.scheduler:Added job "run_crypto_monitor" to job store "default"
-INFO:apscheduler.scheduler:Added job "_resolve_runner.<locals>._stub" to job store "default"
-INFO:apscheduler.scheduler:Added job "_resolve_runner.<locals>._stub" to job store "default"
-INFO:apscheduler.scheduler:Added job "main.<locals>.<lambda>" to job store "default"
-INFO:apscheduler.scheduler:Scheduler started
-INFO:ai-investor-bot:Bot starting polling…
-INFO:apscheduler.scheduler:Scheduler started
+import os
+import logging
+import importlib
+from apscheduler.schedulers.background import BackgroundScheduler
+from telegram.ext import Updater, CommandHandler
+
+from screener_config import ScreenerConfig
+from screener import run_screener
+
+logging.basicConfig(
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger("ai-investor-bot")
+
+
+def _get_env_any(names):
+    for n in names:
+        v = os.environ.get(n)
+        if v:
+            if n != "TELEGRAM_BOT_TOKEN":
+                logger.info("Использую токен из ENV '%s'", n)
+            return v
+    return None
+
+
+def _resolve_runner(module_name, preferred=("run", "main", "run_*", "monitor", "check")):
+    """Импортирует модуль и возвращает подходящую функцию-раннер, иначе — заглушку."""
+    try:
+        m = importlib.import_module(module_name)
+    except Exception as e:
+        logger.exception("Не удалось импортировать модуль %s", module_name)
+
+        def _stub():
+            logger.error("%s: модуль не импортирован (%s)", module_name, e)
+
+        return _stub
+
+    # Ищем по приоритету
+    for name in preferred:
+        if "*" in name:
+            continue
+        fn = getattr(m, name, None)
+        if callable(fn):
+            return fn
+
+    # Ищем любую функцию с префиксом run_
+    for name in dir(m):
+        if name.startswith("run_") and callable(getattr(m, name)):
+            return getattr(m, name)
+
+    def _runner():
+        logger.warning("%s: не найдено ожидаемых функций — пропускаю тик.", module_name)
+
+    return _runner
+
+
+# --- команды Telegram ---
+def cmd_start(update, context):
+    update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
+
+
+def cmd_status(update, context):
+    update.message.reply_text("✅ Бот работает. Мониторы: crypto, ipo, reddit, screener.")
+
+
+def main():
+    token = _get_env_any(["TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TG_BOT_TOKEN"])
+    if not token:
+        raise ValueError("Отсутствует токен Telegram (проверь TELEGRAM_BOT_TOKEN / BOT_TOKEN / TG_BOT_TOKEN)")
+
+    updater = Updater(token, use_context=True)
+    dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", cmd_start))
+    dp.add_handler(CommandHandler("status", cmd_status))
+
+    scheduler = BackgroundScheduler(timezone="Europe/Riga")
+
+    # Флаги включения задач
+    ENABLE_CRYPTO = os.getenv("ENABLE_CRYPTO", "1") not in ("0", "false", "False")
+    ENABLE_IPO = os.getenv("ENABLE_IPO", "1") not in ("0", "false", "False")
+    ENABLE_REDDIT = os.getenv("ENABLE_REDDIT", "1") not in ("0", "false", "False")
+    ENABLE_SCREENER = os.getenv("ENABLE_SCREENER", "1") not in ("0", "false", "False")
+
+    if ENABLE_CRYPTO:
+        run_crypto_monitor = _resolve_runner(
+            "crypto_monitor", preferred=("run_crypto_monitor", "run", "main", "collect_new_coins")
+        )
+        scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
+    else:
+        logger.info("Crypto monitor disabled via ENV")
+
+    if ENABLE_IPO:
+        run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor", "run", "main"))
+        scheduler.add_job(run_ipo_monitor, "interval", hours=6, id="ipo_monitor")
+    else:
+        logger.info("IPO monitor disabled via ENV")
+
+    if ENABLE_REDDIT:
+        run_reddit_monitor = _resolve_runner("reddit_monitor", preferred=("run_reddit_monitor", "run", "main"))
+        scheduler.add_job(run_reddit_monitor, "interval", hours=1, id="reddit_monitor")
+    else:
+        logger.info("Reddit monitor disabled via ENV")
+
+    if ENABLE_SCREENER:
+        cfg = ScreenerConfig()
+        scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15", id="cheap_x_screener")
+    else:
+        logger.info("Screener disabled via ENV")
+
+    scheduler.start()
+    logger.info("Bot starting polling...")
+    updater.start_polling()
+    updater.idle()
+
+
+if __name__ == "__main__":
+    main()
