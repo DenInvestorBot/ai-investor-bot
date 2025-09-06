@@ -3,26 +3,38 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from telegram.ext import Updater, CommandHandler
 
-# Импорты твоих модулей
+# ---- Импорты наших задач
 from crypto_monitor import run_crypto_monitor
-from ipo_monitor import run_ipo_monitor
-from reddit_monitor import run_reddit_monitor
 from screener_config import ScreenerConfig
 from screener import run_screener
 
+# Заглушки (безопасные) — можно удалить, если у тебя есть боевые версии
+try:
+    from ipo_monitor import run_ipo_monitor
+except Exception:  # noqa
+    def run_ipo_monitor():
+        logging.getLogger(__name__).info("IPO monitor: заглушка — задача пропущена")
+
+try:
+    from reddit_monitor import run_reddit_monitor
+except Exception:  # noqa
+    def run_reddit_monitor():
+        logging.getLogger(__name__).info("Reddit monitor: заглушка — задача пропущена")
+
+
 logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ai-investor-bot")
 
 
-def start(update, context):
-    update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status для проверки.")
+def cmd_start(update, context):
+    update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
 
 
-def status(update, context):
-    update.message.reply_text("✅ Бот работает и мониторит рынки.")
+def cmd_status(update, context):
+    update.message.reply_text("✅ Бот работает. Мониторы запущены: crypto, ipo, reddit, screener.")
 
 
 def main():
@@ -30,32 +42,31 @@ def main():
     if not token:
         raise ValueError("Не найден TELEGRAM_BOT_TOKEN в переменных окружения")
 
+    # Telegram bot poller
     updater = Updater(token, use_context=True)
     dp = updater.dispatcher
+    dp.add_handler(CommandHandler("start", cmd_start))
+    dp.add_handler(CommandHandler("status", cmd_status))
 
-    # Команды
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("status", status))
-
-    # Планировщик
+    # Планировщик задач
     scheduler = BackgroundScheduler(timezone="Europe/Riga")
 
-    # 1) Crypto monitor (новые криптовалюты)
-    scheduler.add_job(run_crypto_monitor, "interval", minutes=30)
+    # 1) Трендовые монеты CoinGecko (краткая сводка)
+    scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
 
-    # 2) IPO monitor (новые IPO)
-    scheduler.add_job(run_ipo_monitor, "interval", hours=6)
+    # 2) IPO мониторинг (заглушка, можно заменить своим модулем)
+    scheduler.add_job(run_ipo_monitor, "interval", hours=6, id="ipo_monitor")
 
-    # 3) Reddit monitor (анализ трендов)
-    scheduler.add_job(run_reddit_monitor, "interval", hours=1)
+    # 3) Reddit мониторинг (заглушка, можно заменить своим модулем)
+    scheduler.add_job(run_reddit_monitor, "interval", hours=1, id="reddit_monitor")
 
-    # 4) Screener дешёвых x-охотников (каждые 15 минут)
+    # 4) Скринер «дешёвых x-охотников»
     cfg = ScreenerConfig()
-    scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15")
+    scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15", id="cheap_x_screener")
 
     scheduler.start()
 
-    # Запуск Telegram-бота
+    logger.info("Bot starting polling…")
     updater.start_polling()
     updater.idle()
 
