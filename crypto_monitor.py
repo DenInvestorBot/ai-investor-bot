@@ -18,7 +18,6 @@ def _get_env_any(names):
             return v
     return None
 
-# поддержка альтернативных имён
 TELEGRAM_BOT_TOKEN = _get_env_any(["TELEGRAM_BOT_TOKEN","BOT_TOKEN","TG_BOT_TOKEN"])
 TELEGRAM_CHAT_ID   = _get_env_any(["TELEGRAM_CHAT_ID","CHAT_ID","TG_CHAT_ID"])
 CRYPTO_TREND_ALERTS = os.getenv("CRYPTO_TREND_ALERTS", "1") not in ("0", "false", "False")
@@ -92,7 +91,7 @@ def run_crypto_monitor() -> None:
     if CRYPTO_TREND_ALERTS:
         _send_telegram(msg)
 
-# на случай старых импортов — всегда экспортируем функцию
+# Страховка: всегда экспортируем функцию
 try:
     run_crypto_monitor
 except NameError:
