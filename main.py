@@ -1,3 +1,4 @@
+# main.py
 import os
 import time
 import logging
@@ -112,6 +113,12 @@ def _setup_scheduler():
     return scheduler
 
 
+def _idle_forever():
+    # Держим процесс живым для Render, пока работает планировщик и отправка сообщений
+    while True:
+        time.sleep(60)
+
+
 def main():
     token = _get_env_any(["TELEGRAM_BOT_TOKEN","BOT_TOKEN","TG_BOT_TOKEN"])
     if not token:
@@ -125,7 +132,7 @@ def main():
 
     _setup_scheduler()
 
-    # --- webhook если есть URL, иначе polling ---
+    # 1) сначала WEBHOOK, если есть URL
     public_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/") or os.getenv("WEBHOOK_URL", "").rstrip("/")
     if public_url:
         port = int(os.getenv("PORT", "10000"))
@@ -135,22 +142,31 @@ def main():
         updater.start_webhook(listen=listen_addr, port=port, url_path=url_path)
         updater.bot.setWebhook(f"{public_url}/{url_path}")
         updater.idle()
-    else:
+        return
+
+    # 2) если явный запрет polling — уходим в деградированный режим (только задачи/отправка)
+    if os.getenv("DISABLE_POLLING", "0") in ("1","true","True"):
+        logger.warning("Polling отключён через ENV DISABLE_POLLING=1 — бот не будет читать апдейты, но задачи работают.")
+        try:
+            updater.bot.delete_webhook()
+        except Exception:
+            pass
+        _idle_forever()
+        return
+
+    # 3) иначе пробуем long polling; при конфликте — деградированный режим
+    try:
         try:
             updater.bot.delete_webhook()
         except Exception:
             pass
         logger.info("Starting long polling...")
-        try:
-            updater.start_polling(clean=True, timeout=30, read_latency=10.0)
-            updater.idle()
-        except Conflict as e:
-            logger.error("Polling conflict: %s", e)
-            logger.error("С тем же токеном работает второй экземпляр. "
-                         "Решения: задать WEBHOOK_URL / RENDER_EXTERNAL_URL или перевыпустить токен у @BotFather.")
-            # Деградация: оставляем планировщик жить, без чтения апдейтов
-            while True:
-                time.sleep(60)
+        updater.start_polling(clean=True, timeout=30, read_latency=10.0)
+        updater.idle()
+    except Conflict as e:
+        logger.error("Polling conflict: %s", e)
+        logger.error("Режим деградации: апдейты не читаем, планировщик и отправка сообщений продолжают работать.")
+        _idle_forever()
 
 
 if __name__ == "__main__":
