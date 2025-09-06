@@ -26,9 +26,9 @@ class ScreenerConfig:
     cron: str = "*/15 * * * *"  # каждые 15 минут
 
     # Ограничения API
-    coingecko_api_key: str = "${COINGECKO_API_KEY}"  # можно пусто на старте
+    coingecko_api_key: str = "${COINGECKO_API_KEY}"  # можно пусто
     coingecko_per_page: int = 250
     coingecko_pages: int = 4  # до 1000 монет за проход
 
-    # Опционально: включить DexScreener быстрые «новинки»
+    # Опционально: DexScreener
     use_dexscreener: bool = True
