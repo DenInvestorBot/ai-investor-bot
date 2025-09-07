@@ -70,7 +70,7 @@ def main():
     if ENABLE_CRYPTO:
         run_crypto_monitor = _resolve_runner("crypto_monitor",
                                              preferred=("run_crypto_monitor", "run", "main", "collect_new_coins"))
-        scheduler.add_job(run_crypto_monitor, "interval", minutes=30, id="crypto_trending")
+        scheduler.add_job(run_crypto_monitor, "interval", hours=12, id="crypto_trending")
 
     if ENABLE_IPO:
         run_ipo_monitor = _resolve_runner("ipo_monitor", preferred=("run_ipo_monitor", "run", "main"))
