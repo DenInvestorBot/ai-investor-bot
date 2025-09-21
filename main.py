@@ -6,6 +6,7 @@ from telegram.ext import Updater, CommandHandler
 
 from screener_config import ScreenerConfig
 from screener import run_screener
+import rbne_monitor  # 👈 добавлен импорт RBNE
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -48,7 +49,7 @@ def cmd_start(update, context):
     update.message.reply_text("🤖 AI-Investor-Bot активен! Используй /status.")
 
 def cmd_status(update, context):
-    update.message.reply_text("✅ Бот работает. Мониторы: crypto, ipo, reddit, screener.")
+    update.message.reply_text("✅ Бот работает. Мониторы: crypto, ipo, reddit, screener, rbne.")
 
 def main():
     token = _get_env_any(["TELEGRAM_BOT_TOKEN", "BOT_TOKEN", "TG_BOT_TOKEN"])
@@ -66,6 +67,7 @@ def main():
     ENABLE_IPO      = os.getenv("ENABLE_IPO", "1") not in ("0", "false", "False")
     ENABLE_REDDIT   = os.getenv("ENABLE_REDDIT", "1") not in ("0", "false", "False")
     ENABLE_SCREENER = os.getenv("ENABLE_SCREENER", "1") not in ("0", "false", "False")
+    ENABLE_RBNE     = os.getenv("ENABLE_RBNE", "1") not in ("0", "false", "False")  # 👈 новая переменная
 
     if ENABLE_CRYPTO:
         run_crypto_monitor = _resolve_runner("crypto_monitor",
@@ -83,6 +85,9 @@ def main():
     if ENABLE_SCREENER:
         cfg = ScreenerConfig()
         scheduler.add_job(lambda: run_screener(cfg), "cron", minute="*/15", id="cheap_x_screener")
+
+    if ENABLE_RBNE:
+        scheduler.add_job(rbne_monitor.run_once, "interval", minutes=2, id="rbne_monitor")  # 👈 RBNE-монитор каждые 2 минуты
 
     scheduler.start()
     logger.info("Bot starting polling...")
